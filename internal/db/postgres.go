@@ -48,6 +48,14 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) 
 		return fmt.Errorf("execute migration 002: %w", err)
 	}
 
+	sql3, err := os.ReadFile("migrations/003_invitations.sql")
+	if err != nil {
+		return fmt.Errorf("read migration 003: %w", err)
+	}
+	if _, err := pool.Exec(ctx, string(sql3)); err != nil {
+		return fmt.Errorf("execute migration 003: %w", err)
+	}
+
 	logger.Info("Database migrations applied successfully")
 	return nil
 }

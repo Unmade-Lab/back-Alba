@@ -42,7 +42,8 @@ func (h *CommandHandler) CommitDraft(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	// 1. Commit the draft to the database
-	if err := h.committer.Commit(ctx, req.ActionName, req.Payload); err != nil {
+	resultData, err := h.committer.Commit(ctx, req.ActionName, req.Payload)
+	if err != nil {
 		h.logger.Error("failed to commit draft", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to commit changes"})
 		return
@@ -55,7 +56,12 @@ func (h *CommandHandler) CommitDraft(c *gin.Context) {
 		h.ctxManager.Save(ctx, convCtx)
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"message": "Draft committed successfully",
-	})
+	}
+	if resultData != nil {
+		response["data"] = resultData
+	}
+
+	c.JSON(http.StatusOK, response)
 }

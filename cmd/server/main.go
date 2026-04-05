@@ -79,6 +79,7 @@ func main() {
 	registry.Register(actions.NewCreateDealAction(pgPool, dispatcher))
 	registry.Register(actions.NewCreateCompanyAction(pgPool, dispatcher))
 	registry.Register(actions.NewAddEmployeeDraftAction())
+	registry.Register(actions.NewInviteUserDraftAction())
 	registry.Register(actions.NewGetDealsAction(pgPool))
 	registry.Register(actions.NewUpdateDealStageAction(pgPool, dispatcher))
 
@@ -102,8 +103,9 @@ func main() {
 	cmdHandler := handlers.NewCommandHandler(committer, ctxManager, logger)
 	chatHandler := handlers.NewChatHandler(chatService, hub, logger)
 	wsHandler := handlers.NewWSHandler(hub, logger)
+	authHandler := handlers.NewAuthHandler(pgPool, logger)
 
-	router := api.NewRouter(chatHandler, wsHandler, cmdHandler, cfg.JWTSecret, logger)
+	router := api.NewRouter(chatHandler, wsHandler, cmdHandler, authHandler, cfg.JWTSecret, logger)
 
 	// ── HTTP Server ───────────────────────────────────────────────────────────
 	srv := &http.Server{

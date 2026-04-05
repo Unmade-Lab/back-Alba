@@ -14,6 +14,7 @@ func NewRouter(
 	chatHandler *handlers.ChatHandler,
 	wsHandler *handlers.WSHandler,
 	cmdHandler *handlers.CommandHandler,
+	authHandler *handlers.AuthHandler,
 	jwtSecret string,
 	logger *zap.Logger,
 ) *gin.Engine {
@@ -30,6 +31,12 @@ func NewRouter(
 
 	// WebSocket (auth handled at upgrade level via session_id).
 	r.GET("/ws/chat", wsHandler.Connect)
+
+	// Auth routes (unauthenticated)
+	auth := r.Group("/api/v1/auth")
+	{
+		auth.POST("/activate", authHandler.ActivateInvite)
+	}
 
 	// Authenticated API routes.
 	api := r.Group("/api/v1")

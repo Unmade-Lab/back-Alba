@@ -7,6 +7,7 @@ import (
 
 	"github.com/Unmade-Lab/back-Alba/internal/events"
 	"github.com/Unmade-Lab/back-Alba/internal/models"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,33 +22,35 @@ func NewCommitter(db *pgxpool.Pool, dispatcher *events.Dispatcher) *Committer {
 }
 
 // Commit executes the physical database changes for a confirmed draft.
-func (c *Committer) Commit(ctx context.Context, actionName string, payload map[string]interface{}) error {
+func (c *Committer) Commit(ctx context.Context, actionName string, payload map[string]interface{}) (map[string]interface{}, error) {
 	switch actionName {
 	case "create_company":
 		return c.commitCompany(ctx, payload)
 	case "create_deal":
 		return c.commitDeal(ctx, payload)
+	case "invite_user":
+		return c.commitInviteUser(ctx, payload)
 	default:
-		return fmt.Errorf("unknown draft action for commit: %s", actionName)
+		return nil, fmt.Errorf("unknown draft action for commit: %s", actionName)
 	}
 }
 
-func (c *Committer) commitCompany(ctx context.Context, payload map[string]interface{}) error {
+func (c *Committer) commitCompany(ctx context.Context, payload map[string]interface{}) (map[string]interface{}, error) {
 	// Parse company object
 	companyData, ok := payload["company"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("missing 'company' data in payload")
+		return nil, fmt.Errorf("missing 'company' data in payload")
 	}
 
 	companyBytes, _ := json.Marshal(companyData)
 	var company models.Company
 	if err := json.Unmarshal(companyBytes, &company); err != nil {
-		return fmt.Errorf("invalid company format: %w", err)
+		return nil, fmt.Errorf("invalid company format: %w", err)
 	}
 
 	tx, err := c.db.Begin(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback(ctx)
 
@@ -59,7 +62,7 @@ func (c *Committer) commitCompany(ctx context.Context, payload map[string]interf
 		company.Website, company.Email, company.Phone,
 	)
 	if err != nil {
-		return fmt.Errorf("insert company: %w", err)
+		return nil, fmt.Errorf("insert company: %w", err)
 	}
 
 	// Insert employees (if any)
@@ -72,7 +75,7 @@ func (c *Committer) commitCompany(ctx context.Context, payload map[string]interf
 	*/
 
 	if err := tx.Commit(ctx); err != nil {
-		return err
+		return nil, err
 	}
 
 	c.events.Publish(ctx, events.DomainEvent{
@@ -84,19 +87,19 @@ func (c *Committer) commitCompany(ctx context.Context, payload map[string]interf
 		},
 	})
 
-	return nil
+	return map[string]interface{}{"id": company.ID.String(), "status": "success"}, nil
 }
 
-func (c *Committer) commitDeal(ctx context.Context, payload map[string]interface{}) error {
+func (c *Committer) commitDeal(ctx context.Context, payload map[string]interface{}) (map[string]interface{}, error) {
 	dealData, ok := payload["deal"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("missing 'deal' data in payload")
+		return nil, fmt.Errorf("missing 'deal' data in payload")
 	}
 
 	dealBytes, _ := json.Marshal(dealData)
 	var deal models.Deal
 	if err := json.Unmarshal(dealBytes, &deal); err != nil {
-		return fmt.Errorf("invalid deal format: %w", err)
+		return nil, fmt.Errorf("invalid deal format: %w", err)
 	}
 
 	_, err := c.db.Exec(ctx,
@@ -105,7 +108,7 @@ func (c *Committer) commitDeal(ctx context.Context, payload map[string]interface
 		deal.ID, deal.Name, deal.Amount, deal.Stage, deal.Description,
 	)
 	if err != nil {
-		return fmt.Errorf("insert deal: %w", err)
+		return nil, fmt.Errorf("insert deal: %w", err)
 	}
 
 	c.events.Publish(ctx, events.DomainEvent{
@@ -117,5 +120,40 @@ func (c *Committer) commitDeal(ctx context.Context, payload map[string]interface
 			"amount":      deal.Amount,
 		},
 	})
-	return nil
+	return map[string]interface{}{"id": deal.ID.String(), "status": "success"}, nil
+}
+func (c *Committer) commitInviteUser(ctx context.Context, payload map[string]interface{}) (map[string]interface{}, error) {
+	email, ok := payload["email"].(string)
+	if !ok || email == "" {
+		return nil, fmt.Errorf("email is required")
+	}
+	name, _ := payload["name"].(string)
+	if name == "" {
+		name = "Новый сотрудник"
+	}
+	role, _ := payload["role"].(string)
+	if role == "" {
+		role = "user"
+	}
+
+	token := uuid.New().String()
+	
+	// Create invitation in DB. Here we just set expires_at 7 days from now.
+	_, err := c.db.Exec(ctx,
+		`INSERT INTO invitations (email, name, role, token, expires_at)
+		 VALUES ($1, $2, $3, $4, NOW() + INTERVAL '7 days')`,
+		email, name, role, token,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert invitation: %w", err)
+	}
+
+	inviteURL := fmt.Sprintf("http://localhost:3000/invite?token=%s", token)
+
+	return map[string]interface{}{
+		"status": "success",
+		"token": token,
+		"invite_url": inviteURL,
+		"message": fmt.Sprintf("Коллега добавлен. Отправьте ему ссылку: %s", inviteURL),
+	}, nil
 }
