@@ -1,0 +1,33 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Editor / IDE settings
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Go build outputs
+/bin/
+obj/
+*.test
+*.out
+
+# Environment variables
+.env
+.env.local
+
+# Dependency directories (if vendoring is used)
+vendor/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Any temporary files
+/tmp/
