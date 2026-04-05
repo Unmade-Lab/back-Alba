@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Unmade-Lab/back-Alba/internal/convctx"
 	"github.com/Unmade-Lab/back-Alba/internal/models"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -39,7 +40,7 @@ func (a *GetDealsAction) Schema() map[string]interface{} {
 	}
 }
 
-func (a *GetDealsAction) Execute(ctx context.Context, params map[string]interface{}) (Result, error) {
+func (a *GetDealsAction) Execute(ctx context.Context, convCtx *convctx.ConversationContext, params map[string]interface{}) (Result, error) {
 	stage, _ := params["stage"].(string)
 	limit := 20
 	if l, ok := params["limit"]; ok {

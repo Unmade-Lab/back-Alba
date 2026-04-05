@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Unmade-Lab/back-Alba/internal/convctx"
 	"github.com/Unmade-Lab/back-Alba/internal/events"
 	"github.com/Unmade-Lab/back-Alba/internal/models"
 	"github.com/google/uuid"
@@ -47,7 +48,7 @@ func (a *UpdateDealStageAction) Schema() map[string]interface{} {
 	}
 }
 
-func (a *UpdateDealStageAction) Execute(ctx context.Context, params map[string]interface{}) (Result, error) {
+func (a *UpdateDealStageAction) Execute(ctx context.Context, convCtx *convctx.ConversationContext, params map[string]interface{}) (Result, error) {
 	stage, ok := params["stage"].(string)
 	if !ok || stage == "" {
 		return Result{}, fmt.Errorf("'stage' is required")

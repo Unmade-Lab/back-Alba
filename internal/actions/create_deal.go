@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Unmade-Lab/back-Alba/internal/convctx"
 	"github.com/Unmade-Lab/back-Alba/internal/events"
 	"github.com/Unmade-Lab/back-Alba/internal/models"
 	"github.com/google/uuid"
@@ -52,7 +53,7 @@ func (a *CreateDealAction) Schema() map[string]interface{} {
 	}
 }
 
-func (a *CreateDealAction) Execute(ctx context.Context, params map[string]interface{}) (Result, error) {
+func (a *CreateDealAction) Execute(ctx context.Context, convCtx *convctx.ConversationContext, params map[string]interface{}) (Result, error) {
 	// --- Validation ---
 	name, ok := params["name"].(string)
 	if !ok || name == "" {
@@ -75,29 +76,16 @@ func (a *CreateDealAction) Execute(ctx context.Context, params map[string]interf
 		Description: description,
 	}
 
-	_, err := a.db.Exec(ctx,
-		`INSERT INTO deals (id, name, amount, stage, description)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		deal.ID, deal.Name, deal.Amount, deal.Stage, deal.Description,
-	)
-	if err != nil {
-		return Result{}, fmt.Errorf("insert deal: %w", err)
-	}
-
-	// --- Event ---
-	a.events.Publish(ctx, events.DomainEvent{
-		Type: models.EventDealCreated,
+	convCtx.Draft = &convctx.DraftData{
+		ActionName: a.Name(),
 		Payload: map[string]interface{}{
-			"entity_type": "deal",
-			"entity_id":   deal.ID.String(),
-			"name":        deal.Name,
-			"amount":      deal.Amount,
+			"deal": deal,
 		},
-	})
+	}
 
 	return Result{
 		Data:    deal,
-		Message: fmt.Sprintf("Deal '%s' created successfully with amount $%.2f.", deal.Name, deal.Amount),
+		Message: fmt.Sprintf("I've drafted a new deal '%s' for $%.2f. Please review and confirm to save it.", deal.Name, deal.Amount),
 	}, nil
 }
 

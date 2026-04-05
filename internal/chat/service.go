@@ -25,12 +25,21 @@ type MessageRequest struct {
 
 // MessageResponse is the structured response returned to the client.
 type MessageResponse struct {
+	Type      string         `json:"type,omitempty"` // e.g. "message"
 	MessageID string         `json:"message_id"`
 	SessionID string         `json:"session_id"`
 	Text      string         `json:"text"`
 	Widget    *widget.Widget `json:"widget,omitempty"`
 	Intent    string         `json:"intent,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+// StreamEvent represents a real-time streaming update for the current message.
+type StreamEvent struct {
+	Type      string `json:"type"`       // "stream_start" or "stream_chunk"
+	SessionID string `json:"session_id"`
+	MessageID string `json:"message_id"`
+	Text      string `json:"text,omitempty"`
 }
 
 // Service orchestrates the full chat request lifecycle.
@@ -92,8 +101,46 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 	}
 	llmHistory := toOrchestratorHistory(history)
 
-	// 4. Extract intent via AI Orchestrator.
-	intent, plainText, err := s.orchestrator.ExtractIntent(ctx, req.Message, convCtx, llmHistory)
+	// If this is the very first message in the session, automatically create a Session record with an AI-generated title.
+	if len(history) == 1 && req.UserID != nil {
+		go func(msgText string, sessionID string, uID uuid.UUID) {
+			title, err := s.orchestrator.GenerateTitle(context.Background(), msgText)
+			if err != nil {
+				title = "New Chat"
+				s.logger.Warn("failed to generate title", zap.Error(err))
+			}
+			if err := s.repo.CreateSession(context.Background(), sessionID, uID, title); err != nil {
+				s.logger.Error("failed to create session", zap.Error(err))
+			}
+		}(req.Message, req.SessionID, *req.UserID)
+	}
+
+	// 4. Prepare stream start and callback.
+	assistantMsgID := uuid.New().String()
+	
+	streamStart := StreamEvent{
+		Type:      "stream_start",
+		SessionID: req.SessionID,
+		MessageID: assistantMsgID,
+	}
+	if b, err := json.Marshal(streamStart); err == nil {
+		s.hub.Broadcast(req.SessionID, b)
+	}
+
+	onChunk := func(textChunk string) {
+		chunkEvt := StreamEvent{
+			Type:      "stream_chunk",
+			SessionID: req.SessionID,
+			MessageID: assistantMsgID,
+			Text:      textChunk,
+		}
+		if b, err := json.Marshal(chunkEvt); err == nil {
+			s.hub.Broadcast(req.SessionID, b)
+		}
+	}
+
+	// 5. Extract intent via AI Orchestrator (with streaming callback).
+	intent, plainText, err := s.orchestrator.ExtractIntent(ctx, req.Message, convCtx, llmHistory, onChunk)
 	if err != nil {
 		return nil, fmt.Errorf("extract intent: %w", err)
 	}
@@ -103,24 +150,27 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 	var intentName string
 
 	if intent != nil {
-		// 5. Execute the resolved action.
+		// 6. Execute the resolved action.
 		intentName = intent.Name
 		action, ok := s.registry.Get(intent.Name)
 		if !ok {
 			s.logger.Warn("unknown intent", zap.String("intent", intent.Name))
 			responseText = fmt.Sprintf("I understood you want to '%s', but I don't know how to do that yet.", intent.Name)
 		} else {
-			result, execErr := action.Execute(ctx, intent.Params)
+			result, execErr := action.Execute(ctx, convCtx, intent.Params)
 			if execErr != nil {
 				s.logger.Error("action execute", zap.String("action", intent.Name), zap.Error(execErr))
 				responseText = fmt.Sprintf("I tried to %s but encountered an error: %s", intent.Name, execErr.Error())
 				responseWidget = s.widgetBuilder.Error(execErr.Error())
 			} else {
-				// 6. Build UI widget from result.
+				// 7. Build UI widget from result.
 				responseText = result.Message
 				responseWidget = s.widgetBuilder.Build(intent.Name, result.Data)
 
-				// 7. Update conversation context.
+				// Simulate streaming for the action response text
+				onChunk(responseText)
+
+				// 8. Update conversation context.
 				convCtx.LastAction = intent.Name
 				if result.Data != nil {
 					convCtx.CurrentEntity = intent.Name
@@ -134,8 +184,9 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 		responseText = plainText
 	}
 
-	// 8. Persist assistant response.
+	// 9. Persist assistant response.
 	assistantMsg := &models.ChatMessage{
+		ID:        uuid.MustParse(assistantMsgID),
 		SessionID: req.SessionID,
 		UserID:    req.UserID,
 		Role:      models.RoleAssistant,
@@ -152,6 +203,7 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 
 	// 9. Build final response.
 	response := &MessageResponse{
+		Type:      "message",
 		MessageID: assistantMsg.ID.String(),
 		SessionID: req.SessionID,
 		Text:      responseText,
@@ -171,6 +223,11 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 // GetHistory returns paginated chat history for a session.
 func (s *Service) GetHistory(ctx context.Context, sessionID string, limit int) ([]*models.ChatMessage, error) {
 	return s.repo.GetHistory(ctx, sessionID, limit)
+}
+
+// GetSessions returns all chat sessions for the user.
+func (s *Service) GetSessions(ctx context.Context, userID uuid.UUID) ([]*models.ChatSession, error) {
+	return s.repo.GetSessions(ctx, userID)
 }
 
 // toOrchestratorHistory converts stored messages to the slim format the LLM expects.

@@ -9,6 +9,7 @@ import (
 	"github.com/Unmade-Lab/back-Alba/internal/convctx"
 	"github.com/google/generative-ai-go/genai"
 	"go.uber.org/zap"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -52,11 +53,40 @@ func (o *Orchestrator) ExtractIntent(
 	message string,
 	convCtx *convctx.ConversationContext,
 	history []HistoryMessage,
+	onChunk func(string),
 ) (*Intent, string, error) {
 	if o.mockMode {
-		return o.keywordFallback(message)
+		return o.keywordFallback(message, onChunk)
 	}
-	return o.geminiExtract(ctx, message, convCtx, history)
+	return o.geminiExtract(ctx, message, convCtx, history, onChunk)
+}
+
+// GenerateTitle generates a short 3-5 word title for the chat session based on the first message.
+func (o *Orchestrator) GenerateTitle(ctx context.Context, firstMessage string) (string, error) {
+	if o.mockMode {
+		words := strings.Fields(firstMessage)
+		if len(words) > 4 {
+			return strings.Join(words[:4], " ") + "...", nil
+		}
+		return firstMessage, nil
+	}
+
+	model := o.client.GenerativeModel(o.model)
+	model.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{genai.Text("You are an assistant that creates short, catchy 3-4 word titles for chat conversations based on the user's first message. Return ONLY the title, no quotes, no extra text.")},
+	}
+
+	resp, err := model.GenerateContent(ctx, genai.Text(firstMessage))
+	if err != nil {
+		return "New Chat", fmt.Errorf("generate title: %w", err)
+	}
+
+	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
+		if t, ok := resp.Candidates[0].Content.Parts[0].(genai.Text); ok {
+			return strings.TrimSpace(string(t)), nil
+		}
+	}
+	return "New Chat", nil
 }
 
 // ─────────────────────────────────────────────
@@ -68,51 +98,55 @@ func (o *Orchestrator) geminiExtract(
 	message string,
 	convCtx *convctx.ConversationContext,
 	history []HistoryMessage,
+	onChunk func(string),
 ) (*Intent, string, error) {
 	model := o.client.GenerativeModel(o.model)
 	model.SystemInstruction = &genai.Content{
 		Parts: []genai.Part{genai.Text(SystemPrompt(buildContextSummary(convCtx)))},
 	}
 
-	// Register all actions as Gemini tools.
 	model.Tools = o.buildTools()
-
-	// Build chat session with history.
 	session := model.StartChat()
 	session.History = toGeminiHistory(history)
 
-	resp, err := session.SendMessage(ctx, genai.Text(message))
-	if err != nil {
-		return nil, "", fmt.Errorf("gemini send message: %w", err)
-	}
+	iter := session.SendMessageStream(ctx, genai.Text(message))
 
-	if len(resp.Candidates) == 0 {
-		return nil, "", fmt.Errorf("gemini returned no candidates")
-	}
-
-	// Iterate over response parts — pick up function call if present.
-	for _, part := range resp.Candidates[0].Content.Parts {
-		if fc, ok := part.(genai.FunctionCall); ok {
-			intent := &Intent{
-				Name:   fc.Name,
-				Params: fc.Args,
-			}
-			o.logger.Info("intent extracted via Gemini",
-				zap.String("intent", intent.Name),
-				zap.Any("params", intent.Params),
-			)
-			return intent, "", nil
-		}
-	}
-
-	// Collect plain text response.
 	var sb strings.Builder
-	for _, part := range resp.Candidates[0].Content.Parts {
-		if t, ok := part.(genai.Text); ok {
-			sb.WriteString(string(t))
+	var intent *Intent
+
+	for {
+		resp, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, "", fmt.Errorf("gemini stream: %w", err)
+		}
+
+		if len(resp.Candidates) == 0 {
+			continue
+		}
+
+		for _, part := range resp.Candidates[0].Content.Parts {
+			if fc, ok := part.(genai.FunctionCall); ok {
+				intent = &Intent{
+					Name:   fc.Name,
+					Params: fc.Args,
+				}
+				o.logger.Info("intent extracted via Gemini",
+					zap.String("intent", intent.Name),
+				)
+			} else if t, ok := part.(genai.Text); ok {
+				chunk := string(t)
+				sb.WriteString(chunk)
+				if onChunk != nil {
+					onChunk(chunk)
+				}
+			}
 		}
 	}
-	return nil, sb.String(), nil
+
+	return intent, sb.String(), nil
 }
 
 // buildTools converts all registered actions into Gemini FunctionDeclarations.
@@ -201,7 +235,7 @@ func toGeminiHistory(history []HistoryMessage) []*genai.Content {
 // Keyword fallback (no API key)
 // ─────────────────────────────────────────────
 
-func (o *Orchestrator) keywordFallback(message string) (*Intent, string, error) {
+func (o *Orchestrator) keywordFallback(message string, onChunk func(string)) (*Intent, string, error) {
 	lower := strings.ToLower(message)
 
 	switch {
@@ -235,7 +269,14 @@ func (o *Orchestrator) keywordFallback(message string) (*Intent, string, error) 
 		}, "", nil
 	}
 
-	return nil, "I'm running in offline mode. Please set GEMINI_API_KEY to enable full AI capabilities.", nil
+	text := "I'm running in offline mode. Please set GEMINI_API_KEY to enable full AI capabilities."
+	if onChunk != nil {
+		// Simulate streaming feeling
+		onChunk("I'm running in offline mode. ")
+		onChunk("Please set GEMINI_API_KEY ")
+		onChunk("to enable full AI capabilities.")
+	}
+	return nil, text, nil
 }
 
 func containsAny(s string, keywords ...string) bool {

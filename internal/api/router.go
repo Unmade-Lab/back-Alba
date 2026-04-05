@@ -13,6 +13,7 @@ import (
 func NewRouter(
 	chatHandler *handlers.ChatHandler,
 	wsHandler *handlers.WSHandler,
+	cmdHandler *handlers.CommandHandler,
 	jwtSecret string,
 	logger *zap.Logger,
 ) *gin.Engine {
@@ -38,6 +39,11 @@ func NewRouter(
 		{
 			chat.POST("/message", chatHandler.SendMessage)
 			chat.GET("/history", chatHandler.GetHistory)
+			chat.GET("/sessions", chatHandler.GetSessions)
+		}
+		cmds := api.Group("/commands")
+		{
+			cmds.POST("/commit", cmdHandler.CommitDraft)
 		}
 	}
 

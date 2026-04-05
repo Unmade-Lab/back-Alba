@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Unmade-Lab/back-Alba/internal/convctx"
 	"github.com/Unmade-Lab/back-Alba/internal/events"
 	"github.com/Unmade-Lab/back-Alba/internal/models"
 	"github.com/google/uuid"
@@ -54,7 +55,7 @@ func (a *CreateCompanyAction) Schema() map[string]interface{} {
 	}
 }
 
-func (a *CreateCompanyAction) Execute(ctx context.Context, params map[string]interface{}) (Result, error) {
+func (a *CreateCompanyAction) Execute(ctx context.Context, convCtx *convctx.ConversationContext, params map[string]interface{}) (Result, error) {
 	name, ok := params["name"].(string)
 	if !ok || name == "" {
 		return Result{}, fmt.Errorf("'name' is required")
@@ -69,28 +70,16 @@ func (a *CreateCompanyAction) Execute(ctx context.Context, params map[string]int
 		Phone:    strParam(params, "phone"),
 	}
 
-	_, err := a.db.Exec(ctx,
-		`INSERT INTO companies (id, name, industry, website, email, phone)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		company.ID, company.Name, company.Industry,
-		company.Website, company.Email, company.Phone,
-	)
-	if err != nil {
-		return Result{}, fmt.Errorf("insert company: %w", err)
-	}
-
-	a.events.Publish(ctx, events.DomainEvent{
-		Type: models.EventCompanyCreated,
+	convCtx.Draft = &convctx.DraftData{
+		ActionName: a.Name(),
 		Payload: map[string]interface{}{
-			"entity_type": "company",
-			"entity_id":   company.ID.String(),
-			"name":        company.Name,
+			"company": company,
 		},
-	})
+	}
 
 	return Result{
 		Data:    company,
-		Message: fmt.Sprintf("Company '%s' created successfully.", company.Name),
+		Message: fmt.Sprintf("I've drafted a new company '%s'. Please review and confirm to save it.", company.Name),
 	}, nil
 }
 

@@ -3,6 +3,8 @@ package actions
 import (
 	"context"
 	"fmt"
+
+	"github.com/Unmade-Lab/back-Alba/internal/convctx"
 )
 
 // Result is the structured output returned by every Action.
@@ -20,7 +22,7 @@ type Action interface {
 	// Schema returns a JSON Schema object describing the parameters.
 	Schema() map[string]interface{}
 	// Execute runs the business logic for the action.
-	Execute(ctx context.Context, params map[string]interface{}) (Result, error)
+	Execute(ctx context.Context, convCtx *convctx.ConversationContext, params map[string]interface{}) (Result, error)
 }
 
 // Registry holds all registered actions keyed by name.

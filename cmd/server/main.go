@@ -78,6 +78,7 @@ func main() {
 	registry := actions.NewRegistry()
 	registry.Register(actions.NewCreateDealAction(pgPool, dispatcher))
 	registry.Register(actions.NewCreateCompanyAction(pgPool, dispatcher))
+	registry.Register(actions.NewAddEmployeeDraftAction())
 	registry.Register(actions.NewGetDealsAction(pgPool))
 	registry.Register(actions.NewUpdateDealStageAction(pgPool, dispatcher))
 
@@ -97,10 +98,12 @@ func main() {
 	chatService := chat.NewService(chatRepo, orch, registry, ctxManager, widgetBuilder, hub, logger)
 
 	// ── HTTP Handlers & Router ────────────────────────────────────────────────
+	committer := actions.NewCommitter(pgPool, dispatcher)
+	cmdHandler := handlers.NewCommandHandler(committer, ctxManager, logger)
 	chatHandler := handlers.NewChatHandler(chatService, hub, logger)
 	wsHandler := handlers.NewWSHandler(hub, logger)
 
-	router := api.NewRouter(chatHandler, wsHandler, cfg.JWTSecret, logger)
+	router := api.NewRouter(chatHandler, wsHandler, cmdHandler, cfg.JWTSecret, logger)
 
 	// ── HTTP Server ───────────────────────────────────────────────────────────
 	srv := &http.Server{

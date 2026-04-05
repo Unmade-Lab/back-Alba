@@ -8,6 +8,7 @@ import (
 	"github.com/Unmade-Lab/back-Alba/internal/chat"
 	"github.com/Unmade-Lab/back-Alba/internal/ws"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -96,3 +97,40 @@ func (h *ChatHandler) GetHistory(c *gin.Context) {
 		"count":      len(messages),
 	})
 }
+
+// GetSessions handles GET /chat/sessions
+//
+//	@Summary		Get chat sessions
+//	@Description	Returns all chat sessions (topics) for the current user.
+//	@Tags			chat
+//	@Produce		json
+//	@Success		200			{array}	models.ChatSession
+//	@Failure		401			{object}	map[string]string
+//	@Failure		500			{object}	map[string]string
+//	@Router			/chat/sessions [get]
+func (h *ChatHandler) GetSessions(c *gin.Context) {
+	uidStr, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
+	uid, err := uuid.Parse(uidStr.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id format"})
+		return
+	}
+
+	sessions, err := h.service.GetSessions(c.Request.Context(), uid)
+	if err != nil {
+		h.logger.Error("get sessions", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch chat sessions"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"sessions": sessions,
+		"count":    len(sessions),
+	})
+}
+

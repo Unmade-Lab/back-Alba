@@ -16,6 +16,12 @@ const (
 	ttl       = 24 * time.Hour
 )
 
+// DraftData holds the interactive state of a widget being edited by the user.
+type DraftData struct {
+	ActionName string                 `json:"action_name"`
+	Payload    map[string]interface{} `json:"payload"`
+}
+
 // ConversationContext tracks the state of a single chat session.
 type ConversationContext struct {
 	SessionID      string                 `json:"session_id"`
@@ -24,6 +30,7 @@ type ConversationContext struct {
 	EntityID       string                 `json:"entity_id,omitempty"`
 	LastAction     string                 `json:"last_action,omitempty"`
 	ActiveFilters  map[string]interface{} `json:"active_filters,omitempty"`
+	Draft          *DraftData             `json:"draft,omitempty"`
 }
 
 // Manager stores and retrieves conversation context using Redis.

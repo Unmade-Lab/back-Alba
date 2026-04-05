@@ -32,13 +32,20 @@ func NewPostgresPool(ctx context.Context, dsn string, logger *zap.Logger) (*pgxp
 
 // RunMigrations reads and executes migrations/001_init.sql.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) error {
-	sql, err := os.ReadFile("migrations/001_init.sql")
+	sql1, err := os.ReadFile("migrations/001_init.sql")
 	if err != nil {
-		return fmt.Errorf("read migration file: %w", err)
+		return fmt.Errorf("read migration 001: %w", err)
+	}
+	if _, err := pool.Exec(ctx, string(sql1)); err != nil {
+		return fmt.Errorf("execute migration 001: %w", err)
 	}
 
-	if _, err := pool.Exec(ctx, string(sql)); err != nil {
-		return fmt.Errorf("execute migrations: %w", err)
+	sql2, err := os.ReadFile("migrations/002_chat_sessions.sql")
+	if err != nil {
+		return fmt.Errorf("read migration 002: %w", err)
+	}
+	if _, err := pool.Exec(ctx, string(sql2)); err != nil {
+		return fmt.Errorf("execute migration 002: %w", err)
 	}
 
 	logger.Info("Database migrations applied successfully")

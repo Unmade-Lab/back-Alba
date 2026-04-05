@@ -44,7 +44,7 @@ func (r *Repository) Save(ctx context.Context, msg *models.ChatMessage) error {
 // GetHistory returns the most recent `limit` messages for a session, oldest first.
 func (r *Repository) GetHistory(ctx context.Context, sessionID string, limit int) ([]*models.ChatMessage, error) {
 	if limit <= 0 {
-		limit = 50
+		limit = 50     
 	}
 
 	rows, err := r.db.Query(ctx,
@@ -82,4 +82,47 @@ func (r *Repository) GetHistory(ctx context.Context, sessionID string, limit int
 	}
 
 	return messages, nil
+}
+
+// GetSessions returns all chat sessions for a user, ordered by newest first.
+func (r *Repository) GetSessions(ctx context.Context, userID uuid.UUID) ([]*models.ChatSession, error) {
+	rows, err := r.db.Query(ctx,
+		`SELECT id, user_id, title, created_at, updated_at
+		 FROM chat_sessions
+		 WHERE user_id = $1
+		 ORDER BY updated_at DESC`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query sessions: %w", err)
+	}
+	defer rows.Close()
+
+	var sessions []*models.ChatSession
+	for rows.Next() {
+		var s models.ChatSession
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Title, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		sessions = append(sessions, &s)
+	}
+	if sessions == nil {
+		sessions = []*models.ChatSession{}
+	}
+
+	return sessions, nil
+}
+
+// CreateSession creates a new chat session. Does nothing if ID exists.
+func (r *Repository) CreateSession(ctx context.Context, sessionID string, userID uuid.UUID, title string) error {
+	_, err := r.db.Exec(ctx,
+		`INSERT INTO chat_sessions (id, user_id, title)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (id) DO NOTHING`,
+		sessionID, userID, title,
+	)
+	if err != nil {
+		return fmt.Errorf("create session: %w", err)
+	}
+	return nil
 }
