@@ -5,6 +5,7 @@ import (
 
 	"github.com/Unmade-Lab/back-Alba/internal/api/handlers"
 	"github.com/Unmade-Lab/back-Alba/internal/api/middleware"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -19,6 +20,13 @@ func NewRouter(
 	logger *zap.Logger,
 ) *gin.Engine {
 	r := gin.New()
+
+	// ── CORS Middleware ───────────────────────────────────────────────────────
+	corsConfig := cors.DefaultConfig()
+	corsConfig.AllowAllOrigins = true
+	corsConfig.AllowHeaders = []string{"Origin", "Content-Length", "Content-Type", "Authorization"}
+	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}
+	r.Use(cors.New(corsConfig))
 
 	// Global middleware.
 	r.Use(middleware.Recovery(logger))
