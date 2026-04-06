@@ -103,7 +103,7 @@ func main() {
 	cmdHandler := handlers.NewCommandHandler(committer, ctxManager, logger)
 	chatHandler := handlers.NewChatHandler(chatService, hub, logger)
 	wsHandler := handlers.NewWSHandler(hub, logger)
-	authHandler := handlers.NewAuthHandler(pgPool, logger)
+	authHandler := handlers.NewAuthHandler(pgPool, cfg.JWTSecret, logger)
 
 	router := api.NewRouter(chatHandler, wsHandler, cmdHandler, authHandler, cfg.JWTSecret, logger)
 

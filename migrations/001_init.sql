@@ -14,6 +14,17 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Insert default admin if no users exist
+-- password: admin123 (sha256 = 240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9)
+INSERT INTO users (id, email, name, password_hash, role)
+VALUES (
+    '00000000-0000-0000-0000-000000000001',
+    'admin@alba.local',
+    'Administrator',
+    '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
+    'admin'
+) ON CONFLICT (id) DO NOTHING;
+
 -- =============================================
 -- COMPANIES
 -- =============================================

@@ -4,20 +4,23 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
 type AuthHandler struct {
-	db     *pgxpool.Pool
-	logger *zap.Logger
+	db        *pgxpool.Pool
+	logger    *zap.Logger
+	jwtSecret string
 }
 
-func NewAuthHandler(db *pgxpool.Pool, logger *zap.Logger) *AuthHandler {
-	return &AuthHandler{db: db, logger: logger}
+func NewAuthHandler(db *pgxpool.Pool, jwtSecret string, logger *zap.Logger) *AuthHandler {
+	return &AuthHandler{db: db, jwtSecret: jwtSecret, logger: logger}
 }
 
 type ActivateRequest struct {
@@ -101,3 +104,67 @@ func (h *AuthHandler) ActivateInvite(c *gin.Context) {
 		"role":    role,
 	})
 }
+
+type LoginRequest struct {
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required"`
+}
+
+// Login POST /api/v1/auth/login
+// Verifies credentials and issues a JWT token
+func (h *AuthHandler) Login(c *gin.Context) {
+	var req LoginRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request: valid email and password are required"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	var userID, name, passwordHash, role string
+	err := h.db.QueryRow(ctx, "SELECT id, name, password_hash, role FROM users WHERE email = $1", req.Email).
+		Scan(&userID, &name, &passwordHash, &role)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+			return
+		}
+		h.logger.Error("failed to query user for login", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
+	// Verify password hash
+	hash := sha256.Sum256([]byte(req.Password))
+	if hex.EncodeToString(hash[:]) != passwordHash {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+		return
+	}
+
+	// Generate JWT
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id": userID,
+		"email":   req.Email,
+		"role":    role,
+		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+	})
+
+	tokenString, err := token.SignedString([]byte(h.jwtSecret))
+	if err != nil {
+		h.logger.Error("failed to sign token", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"token": tokenString,
+		"user": map[string]string{
+			"id":    userID,
+			"name":  name,
+			"email": req.Email,
+			"role":  role,
+		},
+	})
+}
+

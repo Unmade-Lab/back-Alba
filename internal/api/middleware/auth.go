@@ -20,11 +20,10 @@ type Claims struct {
 // In development mode with an empty secret, it injects a stub identity.
 func Auth(jwtSecret string, logger *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// Stub mode: no secret configured — allow all requests with a placeholder identity.
-		if jwtSecret == "change-me-in-production" || jwtSecret == "" {
-			c.Set("user_id", "00000000-0000-0000-0000-000000000001")
-			c.Set("email", "dev@alba.local")
-			c.Next()
+		// Ensure a secret exists
+		if jwtSecret == "" {
+			logger.Error("JWT_SECRET is not configured on the server")
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "internal server error: misconfigured auth"})
 			return
 		}
 
