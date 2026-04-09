@@ -52,14 +52,19 @@ func (a *GetDealsAction) Execute(ctx context.Context, convCtx *convctx.Conversat
 		limit = 20
 	}
 
+	wid := ctx.Value(models.CtxWorkspaceID)
+	if wid == nil || wid == "" {
+		return Result{}, fmt.Errorf("workspace context missing")
+	}
+
 	query := `SELECT id, name, amount, stage, description, created_at, updated_at
-	          FROM deals ORDER BY created_at DESC LIMIT $1`
-	args := []interface{}{limit}
+	          FROM deals WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT $2`
+	args := []interface{}{wid, limit}
 
 	if stage != "" {
 		query = `SELECT id, name, amount, stage, description, created_at, updated_at
-		         FROM deals WHERE stage = $1 ORDER BY created_at DESC LIMIT $2`
-		args = []interface{}{stage, limit}
+		         FROM deals WHERE workspace_id = $1 AND stage = $2 ORDER BY created_at DESC LIMIT $3`
+		args = []interface{}{wid, stage, limit}
 	}
 
 	rows, err := a.db.Query(ctx, query, args...)

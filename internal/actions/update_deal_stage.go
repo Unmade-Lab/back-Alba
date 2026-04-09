@@ -54,6 +54,11 @@ func (a *UpdateDealStageAction) Execute(ctx context.Context, convCtx *convctx.Co
 		return Result{}, fmt.Errorf("'stage' is required")
 	}
 
+	wid := ctx.Value(models.CtxWorkspaceID)
+	if wid == nil || wid == "" {
+		return Result{}, fmt.Errorf("workspace context missing")
+	}
+
 	var deal models.Deal
 	dealIDStr, _ := params["deal_id"].(string)
 	dealName, _ := params["deal_name"].(string)
@@ -65,9 +70,9 @@ func (a *UpdateDealStageAction) Execute(ctx context.Context, convCtx *convctx.Co
 		}
 		err = a.db.QueryRow(ctx,
 			`UPDATE deals SET stage=$1, updated_at=NOW()
-			 WHERE id=$2
+			 WHERE id=$2 AND workspace_id=$3
 			 RETURNING id, name, amount, stage, description, created_at, updated_at`,
-			stage, id,
+			stage, id, wid,
 		).Scan(&deal.ID, &deal.Name, &deal.Amount, &deal.Stage, &deal.Description, &deal.CreatedAt, &deal.UpdatedAt)
 		if err != nil {
 			return Result{}, fmt.Errorf("update deal by id: %w", err)
@@ -75,9 +80,9 @@ func (a *UpdateDealStageAction) Execute(ctx context.Context, convCtx *convctx.Co
 	} else if dealName != "" {
 		err := a.db.QueryRow(ctx,
 			`UPDATE deals SET stage=$1, updated_at=NOW()
-			 WHERE name ILIKE $2
+			 WHERE name ILIKE $2 AND workspace_id=$3
 			 RETURNING id, name, amount, stage, description, created_at, updated_at`,
-			stage, "%"+dealName+"%",
+			stage, "%"+dealName+"%", wid,
 		).Scan(&deal.ID, &deal.Name, &deal.Amount, &deal.Stage, &deal.Description, &deal.CreatedAt, &deal.UpdatedAt)
 		if err != nil {
 			return Result{}, fmt.Errorf("update deal by name: %w", err)

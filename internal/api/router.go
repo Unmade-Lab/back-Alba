@@ -43,6 +43,7 @@ func NewRouter(
 	// Auth routes (unauthenticated)
 	auth := r.Group("/api/v1/auth")
 	{
+		auth.POST("/register", authHandler.RegisterWorkspace)
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/activate", authHandler.ActivateInvite)
 	}

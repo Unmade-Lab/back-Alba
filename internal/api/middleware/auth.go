@@ -1,9 +1,11 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
+	"github.com/Unmade-Lab/back-Alba/internal/models"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"go.uber.org/zap"
@@ -11,8 +13,9 @@ import (
 
 // Claims holds the JWT payload.
 type Claims struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
+	UserID      string `json:"user_id"`
+	Email       string `json:"email"`
+	WorkspaceID string `json:"workspace_id"`
 	jwt.RegisteredClaims
 }
 
@@ -56,6 +59,12 @@ func Auth(jwtSecret string, logger *zap.Logger) gin.HandlerFunc {
 
 		c.Set("user_id", claims.UserID)
 		c.Set("email", claims.Email)
+		c.Set("workspace_id", claims.WorkspaceID)
+
+		ctx := context.WithValue(c.Request.Context(), models.CtxUserID, claims.UserID)
+		ctx = context.WithValue(ctx, models.CtxWorkspaceID, claims.WorkspaceID)
+		c.Request = c.Request.WithContext(ctx)
+
 		c.Next()
 	}
 }

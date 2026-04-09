@@ -49,11 +49,11 @@ func (h *AuthHandler) ActivateInvite(c *gin.Context) {
 	defer tx.Rollback(ctx)
 
 	// 2. Find the invitation
-	var email, name, role string
+	var email, name, role, workspaceID string
 	err = tx.QueryRow(ctx, 
-		`SELECT email, name, role FROM invitations WHERE token = $1 AND expires_at > NOW()`, 
+		`SELECT email, name, role, workspace_id FROM invitations WHERE token = $1 AND expires_at > NOW()`, 
 		req.Token,
-	).Scan(&email, &name, &role)
+	).Scan(&email, &name, &role, &workspaceID)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -71,8 +71,8 @@ func (h *AuthHandler) ActivateInvite(c *gin.Context) {
 	passwordHash := hex.EncodeToString(hash[:])
 
 	_, err = tx.Exec(ctx, 
-		`INSERT INTO users (email, name, password_hash, role) VALUES ($1, $2, $3, $4)`,
-		email, name, passwordHash, role,
+		`INSERT INTO users (email, name, password_hash, role, workspace_id) VALUES ($1, $2, $3, $4, $5)`,
+		email, name, passwordHash, role, workspaceID,
 	)
 	if err != nil {
 		h.logger.Error("failed to insert user", zap.Error(err))
@@ -102,6 +102,113 @@ func (h *AuthHandler) ActivateInvite(c *gin.Context) {
 		"message": "Account created and activated successfully",
 		"email":   email,
 		"role":    role,
+		"workspace_id": workspaceID,
+	})
+}
+
+// -------------------------------------------------------------
+// RegisterWorkspace
+// -------------------------------------------------------------
+type RegisterWorkspaceRequest struct {
+	WorkspaceName string `json:"workspace_name" binding:"required"`
+	UserName      string `json:"user_name" binding:"required"`
+	Email         string `json:"email" binding:"required,email"`
+	Password      string `json:"password" binding:"required,min=6"`
+}
+
+// RegisterWorkspace POST /api/v1/auth/register-workspace
+// Creates a new workspace and an admin user.
+func (h *AuthHandler) RegisterWorkspace(c *gin.Context) {
+	var req RegisterWorkspaceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request parameters"})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		h.logger.Error("failed to start transaction", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	// Check if email already exists
+	var exists bool
+	err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM users WHERE email = $1)", req.Email).Scan(&exists)
+	if err != nil {
+		h.logger.Error("failed to check email existence", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+	if exists {
+		c.JSON(http.StatusConflict, gin.H{"error": "User with this email already exists"})
+		return
+	}
+
+	// Create workspace
+	var workspaceID string
+	err = tx.QueryRow(ctx, "INSERT INTO workspaces (name) VALUES ($1) RETURNING id", req.WorkspaceName).Scan(&workspaceID)
+	if err != nil {
+		h.logger.Error("failed to insert workspace", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create workspace"})
+		return
+	}
+
+	// Create user
+	hash := sha256.Sum256([]byte(req.Password))
+	passwordHash := hex.EncodeToString(hash[:])
+	var userID string
+	err = tx.QueryRow(ctx, 
+		`INSERT INTO users (email, name, password_hash, role, workspace_id) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+		req.Email, req.UserName, passwordHash, "admin", workspaceID,
+	).Scan(&userID)
+
+	if err != nil {
+		h.logger.Error("failed to insert user", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		h.logger.Error("failed to commit transaction", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
+	// Generate JWT
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id":      userID,
+		"email":        req.Email,
+		"role":         "admin",
+		"workspace_id": workspaceID,
+		"exp":          time.Now().Add(24 * time.Hour).Unix(),
+	})
+
+	tokenString, err := token.SignedString([]byte(h.jwtSecret))
+	if err != nil {
+		h.logger.Error("failed to sign token", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		return
+	}
+
+	h.logger.Info("Workspace and admin user created successfully", zap.String("workspace", workspaceID), zap.String("email", req.Email))
+
+	c.JSON(http.StatusCreated, gin.H{
+		"token": tokenString,
+		"user": map[string]string{
+			"id":           userID,
+			"name":         req.UserName,
+			"email":        req.Email,
+			"role":         "admin",
+			"workspace_id": workspaceID,
+		},
+		"workspace": map[string]string{
+			"id":   workspaceID,
+			"name": req.WorkspaceName,
+		},
 	})
 }
 
@@ -121,9 +228,9 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
-	var userID, name, passwordHash, role string
-	err := h.db.QueryRow(ctx, "SELECT id, name, password_hash, role FROM users WHERE email = $1", req.Email).
-		Scan(&userID, &name, &passwordHash, &role)
+	var userID, name, passwordHash, role, workspaceID string
+	err := h.db.QueryRow(ctx, "SELECT id, name, password_hash, role, workspace_id FROM users WHERE email = $1", req.Email).
+		Scan(&userID, &name, &passwordHash, &role, &workspaceID)
 
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -144,10 +251,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	// Generate JWT
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": userID,
-		"email":   req.Email,
-		"role":    role,
-		"exp":     time.Now().Add(24 * time.Hour).Unix(),
+		"user_id":      userID,
+		"email":        req.Email,
+		"role":         role,
+		"workspace_id": workspaceID,
+		"exp":          time.Now().Add(24 * time.Hour).Unix(),
 	})
 
 	tokenString, err := token.SignedString([]byte(h.jwtSecret))
@@ -160,10 +268,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"token": tokenString,
 		"user": map[string]string{
-			"id":    userID,
-			"name":  name,
-			"email": req.Email,
-			"role":  role,
+			"id":           userID,
+			"name":         name,
+			"email":        req.Email,
+			"role":         role,
+			"workspace_id": workspaceID,
 		},
 	})
 }

@@ -30,10 +30,15 @@ func (r *Repository) Save(ctx context.Context, msg *models.ChatMessage) error {
 		msg.CreatedAt = time.Now()
 	}
 
+	wid := ctx.Value(models.CtxWorkspaceID)
+	if wid == nil || wid == "" {
+		return fmt.Errorf("workspace context missing")
+	}
+
 	_, err := r.db.Exec(ctx,
-		`INSERT INTO chat_messages (id, session_id, user_id, role, content, widget, intent)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		msg.ID, msg.SessionID, msg.UserID, msg.Role, msg.Content, msg.Widget, msg.Intent,
+		`INSERT INTO chat_messages (id, session_id, user_id, role, content, widget, intent, workspace_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		msg.ID, msg.SessionID, msg.UserID, msg.Role, msg.Content, msg.Widget, msg.Intent, wid,
 	)
 	if err != nil {
 		return fmt.Errorf("save chat message: %w", err)
@@ -47,13 +52,18 @@ func (r *Repository) GetHistory(ctx context.Context, sessionID string, limit int
 		limit = 50     
 	}
 
+	wid := ctx.Value(models.CtxWorkspaceID)
+	if wid == nil || wid == "" {
+		return nil, fmt.Errorf("workspace context missing")
+	}
+
 	rows, err := r.db.Query(ctx,
 		`SELECT id, session_id, user_id, role, content, widget, intent, created_at
 		 FROM chat_messages
-		 WHERE session_id = $1
+		 WHERE session_id = $1 AND workspace_id = $2
 		 ORDER BY created_at DESC
-		 LIMIT $2`,
-		sessionID, limit,
+		 LIMIT $3`,
+		sessionID, wid, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query history: %w", err)
@@ -86,12 +96,17 @@ func (r *Repository) GetHistory(ctx context.Context, sessionID string, limit int
 
 // GetSessions returns all chat sessions for a user, ordered by newest first.
 func (r *Repository) GetSessions(ctx context.Context, userID uuid.UUID) ([]*models.ChatSession, error) {
+	wid := ctx.Value(models.CtxWorkspaceID)
+	if wid == nil || wid == "" {
+		return nil, fmt.Errorf("workspace context missing")
+	}
+
 	rows, err := r.db.Query(ctx,
 		`SELECT id, user_id, title, created_at, updated_at
 		 FROM chat_sessions
-		 WHERE user_id = $1
+		 WHERE user_id = $1 AND workspace_id = $2
 		 ORDER BY updated_at DESC`,
-		userID,
+		userID, wid,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query sessions: %w", err)
@@ -115,11 +130,16 @@ func (r *Repository) GetSessions(ctx context.Context, userID uuid.UUID) ([]*mode
 
 // CreateSession creates a new chat session. Does nothing if ID exists.
 func (r *Repository) CreateSession(ctx context.Context, sessionID string, userID uuid.UUID, title string) error {
+	wid := ctx.Value(models.CtxWorkspaceID)
+	if wid == nil || wid == "" {
+		return fmt.Errorf("workspace context missing")
+	}
+
 	_, err := r.db.Exec(ctx,
-		`INSERT INTO chat_sessions (id, user_id, title)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO chat_sessions (id, user_id, title, workspace_id)
+		 VALUES ($1, $2, $3, $4)
 		 ON CONFLICT (id) DO NOTHING`,
-		sessionID, userID, title,
+		sessionID, userID, title, wid,
 	)
 	if err != nil {
 		return fmt.Errorf("create session: %w", err)

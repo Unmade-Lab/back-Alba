@@ -54,12 +54,17 @@ func (c *Committer) commitCompany(ctx context.Context, payload map[string]interf
 	}
 	defer tx.Rollback(ctx)
 
+	wid := ctx.Value(models.CtxWorkspaceID)
+	if wid == nil || wid == "" {
+		return nil, fmt.Errorf("workspace context missing")
+	}
+
 	// Insert company
 	_, err = tx.Exec(ctx,
-		`INSERT INTO companies (id, name, industry, website, email, phone)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO companies (id, name, industry, website, email, phone, workspace_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		company.ID, company.Name, company.Industry,
-		company.Website, company.Email, company.Phone,
+		company.Website, company.Email, company.Phone, wid,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert company: %w", err)
@@ -102,10 +107,15 @@ func (c *Committer) commitDeal(ctx context.Context, payload map[string]interface
 		return nil, fmt.Errorf("invalid deal format: %w", err)
 	}
 
+	wid := ctx.Value(models.CtxWorkspaceID)
+	if wid == nil || wid == "" {
+		return nil, fmt.Errorf("workspace context missing")
+	}
+
 	_, err := c.db.Exec(ctx,
-		`INSERT INTO deals (id, name, amount, stage, description)
-		 VALUES ($1, $2, $3, $4, $5)`,
-		deal.ID, deal.Name, deal.Amount, deal.Stage, deal.Description,
+		`INSERT INTO deals (id, name, amount, stage, description, workspace_id)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		deal.ID, deal.Name, deal.Amount, deal.Stage, deal.Description, wid,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert deal: %w", err)
@@ -136,13 +146,18 @@ func (c *Committer) commitInviteUser(ctx context.Context, payload map[string]int
 		role = "user"
 	}
 
+	wid := ctx.Value(models.CtxWorkspaceID)
+	if wid == nil || wid == "" {
+		return nil, fmt.Errorf("workspace context missing")
+	}
+
 	token := uuid.New().String()
 	
 	// Create invitation in DB. Here we just set expires_at 7 days from now.
 	_, err := c.db.Exec(ctx,
-		`INSERT INTO invitations (email, name, role, token, expires_at)
-		 VALUES ($1, $2, $3, $4, NOW() + INTERVAL '7 days')`,
-		email, name, role, token,
+		`INSERT INTO invitations (email, name, role, token, workspace_id, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '7 days')`,
+		email, name, role, token, wid,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert invitation: %w", err)
