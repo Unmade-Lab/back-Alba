@@ -2,6 +2,20 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- =============================================
+-- WORKSPACES (must exist before users due to FK)
+-- =============================================
+CREATE TABLE IF NOT EXISTS workspaces (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Seed the default workspace so the default admin user has a valid workspace_id
+INSERT INTO workspaces (id, name)
+VALUES ('00000000-0000-0000-0000-000000000001', 'Default Workspace')
+ON CONFLICT (id) DO NOTHING;
+
+-- =============================================
 -- USERS
 -- =============================================
 CREATE TABLE IF NOT EXISTS users (
@@ -10,19 +24,21 @@ CREATE TABLE IF NOT EXISTS users (
     name          VARCHAR(255) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role          VARCHAR(50)  NOT NULL DEFAULT 'user',
+    workspace_id  UUID        REFERENCES workspaces(id) ON DELETE CASCADE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Insert default admin if no users exist
 -- password: admin123 (sha256 = 240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9)
-INSERT INTO users (id, email, name, password_hash, role)
+INSERT INTO users (id, email, name, password_hash, role, workspace_id)
 VALUES (
     '00000000-0000-0000-0000-000000000001',
     'admin@alba.local',
     'Administrator',
     '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9',
-    'admin'
+    'admin',
+    '00000000-0000-0000-0000-000000000001'
 ) ON CONFLICT (id) DO NOTHING;
 
 -- =============================================
