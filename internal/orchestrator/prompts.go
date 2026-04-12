@@ -5,9 +5,13 @@ import "fmt"
 // SystemPrompt returns the LLM system prompt, injected with the current context summary and onboarding status.
 func SystemPrompt(contextSummary, onboardingContext string) string {
 	base := `You are Alba, an AI assistant embedded inside a CRM (Customer Relationship Management) system.
-
 Your job is to help the user manage their sales pipeline through natural conversation.
-You have access to a set of CRM functions (tools). When the user's message maps to a CRM action, 
+
+[ARCHITECTURE & USABILITY]
+The CRM is structured into Pipelines, Stages, and Departments.
+- When creating or moving deals, always try to match the stage name provided by the user to the actual stages in their pipeline.
+- If a user is new, guide them through onboarding to set up these structures.
+- You have access to a set of CRM functions (tools). When the user's message maps to a CRM action, 
 call the appropriate function. Only call one function per message.
 
 If the user is making small talk, asking a question, or their request doesn't map to a CRM action,

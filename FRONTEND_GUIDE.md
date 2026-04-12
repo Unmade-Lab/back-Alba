@@ -1,94 +1,169 @@
-# 🚀 Frontend Developer's Guide: Alba CRM Interaction
+# 🚀 Frontend Developer's Guide: Alba CRM API Reference
 
-This guide explains how to integrate the frontend with the Alba AI CRM backend, specifically focusing on the new **Onboarding Flow** and **AI Chat** features.
-
----
-
-## 1. Authentication & Session Management
-
-### Login / Registration
-- **Register**: `POST /api/v1/auth/register`
-- **Login**: `POST /api/v1/auth/login`
-- **Refresh**: `POST /api/v1/auth/refresh` (use when Access Token expires in 15m)
-
-**Important**: All authenticated requests must include the `Authorization: Bearer <access_token>` header.
+This document provides a comprehensive reference for the Alba AI CRM API, including all JSON structures, WebSocket events, and interaction patterns.
 
 ---
 
-## 2. Onboarding Workflow (Usability Flow)
+## 1. Authentication (JWT + Refresh Tokens)
 
-When a user enters the app, the frontend should determine their state:
-
-1. **Check Status**: Call `GET /api/v1/workspace/status`.
-2. **Handle State**:
-   - If `onboarding_completed: false`: Redirect to the **Onboarding Chat View**.
-   - If `onboarding_completed: true`: Show the **Main CRM Dashboard**.
-
-### Proactive Welcome
-Upon registration, the backend automatically creates a chat session and generates a welcome message. 
-- **Action**: Fetch the latest sessions using `GET /api/v1/chat/sessions` and load the history of the first one. Alba will already be there greeting the user.
-
----
-
-## 3. The AI Chat API
-
-### Sending Messages
-`POST /api/v1/chat/message`
-Request body:
+### 1.1 Register Workspace
+`POST /api/v1/auth/register`
+**Request:**
 ```json
 {
-  "session_id": "uuid-here",
-  "message": "We are a SaaS company selling AI tools."
+  "workspace_name": "Acme Corp",
+  "user_name": "Admin",
+  "email": "admin@acme.com",
+  "password": "secret_password"
 }
 ```
-
-### Handling the Response
-The response is structured to support rich UI:
+**Response (201 Created):**
 ```json
 {
-  "text": "Great! I've set up your SaaS sales funnel...",
-  "intent": "complete_onboarding",
-  "widget": {
-    "type": "onboarding_result",
-    "data": {
-      "stages": ["Lead", "Demo", "Trial", "Won"],
-      "departments": ["Sales", "Product"]
-    }
+  "access_token": "eyJhbG...",
+  "refresh_token": "8f8e...",
+  "user": {
+    "id": "uuid",
+    "name": "Admin",
+    "email": "admin@acme.com",
+    "role": "admin",
+    "workspace_id": "uuid"
+  },
+  "workspace": {
+    "id": "uuid",
+    "name": "Acme Corp"
   }
 }
 ```
 
-### Widgets to Implement:
-- **`deal`**: Show a deal card with confirm/cancel buttons.
-- **`onboarding_result`**: Show a summary of created stages and departments.
-- **`error`**: Show a toast or error alert.
+### 1.2 Login
+`POST /api/v1/auth/login` (Same response as Register)
+
+### 1.3 Refresh Token
+`POST /api/v1/auth/refresh`
+**Request:**
+```json
+{ "refresh_token": "token-from-cookies-or-localstorage" }
+```
+**Response (200 OK):**
+```json
+{
+  "access_token": "new-access-token",
+  "refresh_token": "new-rotated-refresh-token"
+}
+```
 
 ---
 
-## 4. Real-time Streaming (UX)
+## 2. Onboarding & Workspace State
 
-For a "ChatGPT-like" typing effect, connect to the WebSocket:
-`GET /ws/chat?session_id=...`
-
-**Events to listen for:**
-1. `stream_start`: Prepare a new message bubble.
-2. `stream_chunk`: Append text to the current bubble.
-3. `message`: (Final event) Contains the full text, metadata, and optional **widget**.
-
----
-
-## 5. Completing Onboarding
-Once the AI has enough info, it will call the `complete_onboarding` tool internally. 
-- The user will see a final message and a summary widget.
-- After this, `GET /api/v1/workspace/status` will return `true`. 
-- **Frontend Action**: Refresh the app state to switch from "Onboarding Mode" to "Dashboard Mode".
+### 2.1 Get Workspace Status
+`GET /api/v1/workspace/status`
+**Response:**
+```json
+{
+  "id": "uuid",
+  "name": "Acme Corp",
+  "onboarding_completed": false
+}
+```
+*Use `onboarding_completed` to decide whether to show the "AI Setup Chat" or the "Dashboard".*
 
 ---
 
-## Useful Endpoints Summary
-| Method | Path | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/v1/workspace/status` | Current shop onboarding status |
-| `GET` | `/api/v1/chat/history` | Load messages for a session |
-| `GET` | `/api/v1/chat/sessions` | List of chat topics for the user |
-| `POST` | `/api/v1/commands/commit` | Used to confirm "Draft" actions (like creating a user) |
+## 3. AI Chat & Messaging
+
+### 3.1 Send Message
+`POST /api/v1/chat/message`
+**Request:**
+```json
+{
+  "session_id": "uuid",
+  "message": "We sell solar panels in Spain."
+}
+```
+**Response:**
+```json
+{
+  "id": "uuid",
+  "role": "assistant",
+  "content": "Perfect! I'll set up a Sales Funnel for solar panels.",
+  "intent": "complete_onboarding",
+  "widget": {
+    "type": "onboarding_result",
+    "data": {
+      "industry": "services",
+      "stages": ["Lead", "Proposal", "Won"],
+      "departments": ["Sales", "Installation"]
+    }
+  },
+  "created_at": "2026-04-12T..."
+}
+```
+
+### 3.2 List Sessions
+`GET /api/v1/chat/sessions`
+**Response:**
+```json
+[
+  {
+    "id": "uuid",
+    "title": "Solar Panel Onboarding",
+    "created_at": "...",
+    "updated_at": "..."
+  }
+]
+```
+
+---
+
+## 4. WebSocket Streaming Protocol (UX)
+
+Connect to: `ws://your-api.com/ws/chat?session_id=UUID&token=ACCESS_TOKEN`
+
+### Event Types:
+
+#### `stream_start` (Sent when AI begins generating text)
+```json
+{ "type": "stream_start" }
+```
+
+#### `stream_chunk` (Sent for every word/token)
+```json
+{ 
+  "type": "stream_chunk", 
+  "content": "Hello " 
+}
+```
+
+#### `message` (Sent when the response is fully completed)
+*Contains the full JSON message object as defined in section 3.1.*
+
+---
+
+## 5. UI Widgets Reference
+
+When a message contains a `widget` field, render the corresponding UI component:
+
+### `onboarding_result`
+- **Data**: `industry` (string), `stages` (array), `departments` (array).
+- **UI**: Success card showing the generated CRM structure.
+
+### `deal`
+- **Data**: `id`, `name`, `amount`, `stage`.
+- **UI**: Interactive card with "Confirm" / "Edit" buttons. 
+- **Action**: Confirmed deals should be sent to `POST /api/v1/commands/commit`.
+
+### `error`
+- **Data**: `message`.
+- **UI**: Error toast or alert message.
+
+---
+
+## 6. Error Handling
+Global error format (4xx/5xx):
+```json
+{
+  "error": "Detailed error message here"
+}
+```

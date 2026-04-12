@@ -19,7 +19,8 @@ type CompleteOnboardingAction struct {
 
 type OnboardingRepo interface {
 	UpdateWorkspaceOnboarding(ctx context.Context, id uuid.UUID, industry string, data json.RawMessage) error
-	SeedOnboardingTemplates(ctx context.Context, wid uuid.UUID, pipelineName string, stages []string, departments []string) error
+	SeedOnboardingTemplates(ctx context.Context, wid uuid.UUID, pipelineName string, stages []string, departments []string) (uuid.UUID, uuid.UUID, uuid.UUID, error)
+	LinkUserToDepartment(ctx context.Context, userID, departmentID uuid.UUID) error
 }
 
 func NewCompleteOnboardingAction(db *pgxpool.Pool, repo OnboardingRepo) *CompleteOnboardingAction {
@@ -85,11 +86,21 @@ func (a *CompleteOnboardingAction) Execute(ctx context.Context, convCtx *convctx
 	}
 
 	// 1. Seed Templates
-	if err := a.repo.SeedOnboardingTemplates(ctx, wid, pipelineName, stages, departments); err != nil {
+	_, _, firstDeptID, err := a.repo.SeedOnboardingTemplates(ctx, wid, pipelineName, stages, departments)
+	if err != nil {
 		return Result{}, fmt.Errorf("seed templates: %w", err)
 	}
 
-	// 2. Mark Workspace as Onboarded
+	// 2. Link current user (admin) to the first department
+	uIDStr := ctx.Value(models.CtxUserID)
+	if uIDStr != nil {
+		uID, _ := uuid.Parse(uIDStr.(string))
+		if firstDeptID != uuid.Nil {
+			_ = a.repo.LinkUserToDepartment(ctx, uID, firstDeptID)
+		}
+	}
+
+	// 3. Mark Workspace as Onboarded
 	metadata, _ := json.Marshal(params)
 	if err := a.repo.UpdateWorkspaceOnboarding(ctx, wid, industry, metadata); err != nil {
 		return Result{}, fmt.Errorf("update workspace status: %w", err)

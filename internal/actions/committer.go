@@ -114,9 +114,10 @@ func (c *Committer) commitDeal(ctx context.Context, payload map[string]interface
 	}
 
 	_, err := c.db.Exec(ctx,
-		`INSERT INTO deals (id, name, amount, stage, description, workspace_id)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO deals (id, name, amount, stage, description, workspace_id, pipeline_id, stage_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		deal.ID, deal.Name, deal.Amount, deal.Stage, deal.Description, wid,
+		deal.PipelineID, deal.StageID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert deal: %w", err)

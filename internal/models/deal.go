@@ -19,9 +19,12 @@ const (
 // Deal represents a sales opportunity in the CRM.
 type Deal struct {
 	ID          uuid.UUID  `json:"id"`
+	WorkspaceID uuid.UUID  `json:"workspace_id"`
 	Name        string     `json:"name"`
 	Amount      float64    `json:"amount"`
-	Stage       string     `json:"stage"`
+	Stage       string     `json:"stage"` // legacy, kept for backward compatibility
+	PipelineID  *uuid.UUID `json:"pipeline_id,omitempty"`
+	StageID     *uuid.UUID `json:"stage_id,omitempty"`
 	CompanyID   *uuid.UUID `json:"company_id,omitempty"`
 	OwnerID     *uuid.UUID `json:"owner_id,omitempty"`
 	CloseDate   *time.Time `json:"close_date,omitempty"`

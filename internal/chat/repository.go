@@ -172,11 +172,12 @@ func (r *Repository) UpdateWorkspaceOnboarding(ctx context.Context, id uuid.UUID
 	return err
 }
 
-// SeedOnboardingTemplates creates the initial structure for a workspace.
-func (r *Repository) SeedOnboardingTemplates(ctx context.Context, wid uuid.UUID, pipelineName string, stages []string, departments []string) error {
+// SeedOnboardingTemplates creates the initial structure for a workspace. 
+// Returns (pipelineID, firstStageID, firstDepartmentID, error).
+func (r *Repository) SeedOnboardingTemplates(ctx context.Context, wid uuid.UUID, pipelineName string, stages []string, departments []string) (uuid.UUID, uuid.UUID, uuid.UUID, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return err
+		return uuid.Nil, uuid.Nil, uuid.Nil, err
 	}
 	defer tx.Rollback(ctx)
 
@@ -187,30 +188,53 @@ func (r *Repository) SeedOnboardingTemplates(ctx context.Context, wid uuid.UUID,
 		wid, pipelineName,
 	).Scan(&pipelineID)
 	if err != nil {
-		return fmt.Errorf("create pipeline: %w", err)
+		return uuid.Nil, uuid.Nil, uuid.Nil, fmt.Errorf("create pipeline: %w", err)
 	}
 
 	// 2. Create Stages
+	var firstStageID uuid.UUID
 	for i, stageName := range stages {
-		_, err = tx.Exec(ctx,
-			`INSERT INTO stages (pipeline_id, name, sort_order) VALUES ($1, $2, $3)`,
+		var sID uuid.UUID
+		err = tx.QueryRow(ctx,
+			`INSERT INTO stages (pipeline_id, name, sort_order) VALUES ($1, $2, $3) RETURNING id`,
 			pipelineID, stageName, i*10,
-		)
+		).Scan(&sID)
 		if err != nil {
-			return fmt.Errorf("create stage %s: %w", stageName, err)
+			return uuid.Nil, uuid.Nil, uuid.Nil, fmt.Errorf("create stage %s: %w", stageName, err)
+		}
+		if i == 0 {
+			firstStageID = sID
 		}
 	}
 
 	// 3. Create Departments
-	for _, depName := range departments {
-		_, err = tx.Exec(ctx,
-			`INSERT INTO departments (workspace_id, name) VALUES ($1, $2)`,
+	var firstDeptID uuid.UUID
+	for i, depName := range departments {
+		var dID uuid.UUID
+		err = tx.QueryRow(ctx,
+			`INSERT INTO departments (workspace_id, name) VALUES ($1, $2) RETURNING id`,
 			wid, depName,
-		)
+		).Scan(&dID)
 		if err != nil {
-			return fmt.Errorf("create department %s: %w", depName, err)
+			return uuid.Nil, uuid.Nil, uuid.Nil, fmt.Errorf("create department %s: %w", depName, err)
+		}
+		if i == 0 {
+			firstDeptID = dID
 		}
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, uuid.Nil, uuid.Nil, err
+	}
+
+	return pipelineID, firstStageID, firstDeptID, nil
+}
+
+// LinkUserToDepartment associates a user with a department.
+func (r *Repository) LinkUserToDepartment(ctx context.Context, userID, departmentID uuid.UUID) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE users SET department_id = $1, updated_at = NOW() WHERE id = $2`,
+		departmentID, userID,
+	)
+	return err
 }

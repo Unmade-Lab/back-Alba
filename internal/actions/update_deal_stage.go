@@ -63,32 +63,45 @@ func (a *UpdateDealStageAction) Execute(ctx context.Context, convCtx *convctx.Co
 	dealIDStr, _ := params["deal_id"].(string)
 	dealName, _ := params["deal_name"].(string)
 
+	var targetID uuid.UUID
+	
+	// 1. Find the deal first to get its pipeline_id
+	var pID uuid.UUID
 	if dealIDStr != "" {
-		id, err := uuid.Parse(dealIDStr)
-		if err != nil {
-			return Result{}, fmt.Errorf("invalid deal_id: %w", err)
-		}
-		err = a.db.QueryRow(ctx,
-			`UPDATE deals SET stage=$1, updated_at=NOW()
-			 WHERE id=$2 AND workspace_id=$3
-			 RETURNING id, name, amount, stage, description, created_at, updated_at`,
-			stage, id, wid,
-		).Scan(&deal.ID, &deal.Name, &deal.Amount, &deal.Stage, &deal.Description, &deal.CreatedAt, &deal.UpdatedAt)
-		if err != nil {
-			return Result{}, fmt.Errorf("update deal by id: %w", err)
-		}
+		targetID, _ = uuid.Parse(dealIDStr)
+		_ = a.db.QueryRow(ctx, "SELECT pipeline_id FROM deals WHERE id = $1 AND workspace_id = $2", targetID, wid).Scan(&pID)
 	} else if dealName != "" {
-		err := a.db.QueryRow(ctx,
-			`UPDATE deals SET stage=$1, updated_at=NOW()
-			 WHERE name ILIKE $2 AND workspace_id=$3
-			 RETURNING id, name, amount, stage, description, created_at, updated_at`,
-			stage, "%"+dealName+"%", wid,
-		).Scan(&deal.ID, &deal.Name, &deal.Amount, &deal.Stage, &deal.Description, &deal.CreatedAt, &deal.UpdatedAt)
-		if err != nil {
-			return Result{}, fmt.Errorf("update deal by name: %w", err)
+		_ = a.db.QueryRow(ctx, "SELECT id, pipeline_id FROM deals WHERE name ILIKE $1 AND workspace_id = $2 LIMIT 1", "%"+dealName+"%", wid).Scan(&targetID, &pID)
+	}
+
+	if targetID == uuid.Nil {
+		return Result{}, fmt.Errorf("could not find deal")
+	}
+
+	// 2. Resolve StageID by name within that pipeline
+	var stageID uuid.UUID
+	err := a.db.QueryRow(ctx, "SELECT id FROM stages WHERE pipeline_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1", pID, stage).Scan(&stageID)
+	if err != nil {
+		// If stage NAME not found, maybe try finding it by ID if the AI passed an ID? 
+		// Or just fallback to whatever was passed if it's a UUID
+		sID, errP := uuid.Parse(stage)
+		if errP == nil {
+			stageID = sID
+		} else {
+			return Result{}, fmt.Errorf("stage '%s' not found for this deal's pipeline", stage)
 		}
-	} else {
-		return Result{}, fmt.Errorf("provide either 'deal_id' or 'deal_name'")
+	}
+
+	// 3. Update the deal
+	err = a.db.QueryRow(ctx,
+		`UPDATE deals SET stage=$1, stage_id=$2, updated_at=NOW()
+		 WHERE id=$3 AND workspace_id=$4
+		 RETURNING id, name, amount, stage, description, created_at, updated_at`,
+		stage, stageID, targetID, wid,
+	).Scan(&deal.ID, &deal.Name, &deal.Amount, &deal.Stage, &deal.Description, &deal.CreatedAt, &deal.UpdatedAt)
+	
+	if err != nil {
+		return Result{}, fmt.Errorf("update deal: %w", err)
 	}
 
 	a.events.Publish(ctx, events.DomainEvent{
