@@ -30,38 +30,64 @@ func NewPostgresPool(ctx context.Context, dsn string, logger *zap.Logger) (*pgxp
 	return pool, nil
 }
 
-// RunMigrations reads and executes migrations/001_init.sql.
+// RunMigrations ensures all migrations are applied exactly once.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) error {
-	sql1, err := os.ReadFile("migrations/001_init.sql")
+	// 1. Create migrations table if not exists
+	_, err := pool.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			name VARCHAR(255) PRIMARY KEY,
+			applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+	`)
 	if err != nil {
-		return fmt.Errorf("read migration 001: %w", err)
-	}
-	if _, err := pool.Exec(ctx, string(sql1)); err != nil {
-		return fmt.Errorf("execute migration 001: %w", err)
+		return fmt.Errorf("create migrations table: %w", err)
 	}
 
-	sql2, err := os.ReadFile("migrations/002_chat_sessions.sql")
-	if err != nil {
-		return fmt.Errorf("read migration 002: %w", err)
-	}
-	if _, err := pool.Exec(ctx, string(sql2)); err != nil {
-		return fmt.Errorf("execute migration 002: %w", err)
-	}
-
-	sql3, err := os.ReadFile("migrations/003_invitations.sql")
-	if err != nil {
-		return fmt.Errorf("read migration 003: %w", err)
-	}
-	if _, err := pool.Exec(ctx, string(sql3)); err != nil {
-		return fmt.Errorf("execute migration 003: %w", err)
+	files := []string{
+		"001_init.sql",
+		"002_chat_sessions.sql",
+		"003_invitations.sql",
+		"004_workspaces.sql",
 	}
 
-	sql4, err := os.ReadFile("migrations/004_workspaces.sql")
-	if err != nil {
-		return fmt.Errorf("read migration 004: %w", err)
-	}
-	if _, err := pool.Exec(ctx, string(sql4)); err != nil {
-		return fmt.Errorf("execute migration 004: %w", err)
+	for _, filename := range files {
+		// Check if already applied
+		var exists bool
+		err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name = $1)", filename).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("check migration %s: %w", filename, err)
+		}
+
+		if exists {
+			logger.Debug("Skipping already applied migration", zap.String("file", filename))
+			continue
+		}
+
+		// Apply migration
+		logger.Info("Applying migration", zap.String("file", filename))
+		content, err := os.ReadFile(fmt.Sprintf("migrations/%s", filename))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", filename, err)
+		}
+
+		// Use a transaction for each migration file
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("begin tx for %s: %w", filename, err)
+		}
+		defer tx.Rollback(ctx) //nolint:errcheck
+
+		if _, err := tx.Exec(ctx, string(content)); err != nil {
+			return fmt.Errorf("execute migration %s: %w", filename, err)
+		}
+
+		if _, err := tx.Exec(ctx, "INSERT INTO schema_migrations (name) VALUES ($1)", filename); err != nil {
+			return fmt.Errorf("record migration %s: %w", filename, err)
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("commit migration %s: %w", filename, err)
+		}
 	}
 
 	logger.Info("Database migrations applied successfully")
