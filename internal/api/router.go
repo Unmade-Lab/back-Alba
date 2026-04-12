@@ -59,6 +59,7 @@ func NewRouter(
 			chat.POST("/message", chatHandler.SendMessage)
 			chat.GET("/history", chatHandler.GetHistory)
 			chat.GET("/sessions", chatHandler.GetSessions)
+			chat.POST("/sessions", chatHandler.CreateSession)
 		}
 		api.GET("/workspace/status", authHandler.WorkspaceStatus)
 		cmds := api.Group("/commands")

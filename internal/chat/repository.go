@@ -21,6 +21,11 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
 
+// DB returns the underlying database pool.
+func (r *Repository) DB() *pgxpool.Pool {
+	return r.db
+}
+
 // Save persists a ChatMessage to the database.
 func (r *Repository) Save(ctx context.Context, msg *models.ChatMessage) error {
 	if msg.ID == uuid.Nil {
@@ -147,6 +152,15 @@ func (r *Repository) CreateSession(ctx context.Context, sessionID string, userID
 	return nil
 }
 
+// UpdateSessionTitle updates the title of a chat session.
+func (r *Repository) UpdateSessionTitle(ctx context.Context, sessionID string, title string) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE chat_sessions SET title = $1, updated_at = NOW() WHERE id = $2`,
+		title, sessionID,
+	)
+	return err
+}
+
 // GetWorkspace returns a workspace by ID.
 func (r *Repository) GetWorkspace(ctx context.Context, id uuid.UUID) (*models.Workspace, error) {
 	var ws models.Workspace
@@ -237,4 +251,77 @@ func (r *Repository) LinkUserToDepartment(ctx context.Context, userID, departmen
 		departmentID, userID,
 	)
 	return err
+}
+
+// GetWorkspaceSnapshot aggregates all relevant workspace metadata and stats for the AI context.
+func (r *Repository) GetWorkspaceSnapshot(ctx context.Context, wid uuid.UUID) (*models.WorkspaceSnapshot, error) {
+	snapshot := &models.WorkspaceSnapshot{
+		Stats: make(map[string]interface{}),
+	}
+
+	// 1. Get Workspace Metadata
+	err := r.db.QueryRow(ctx,
+		`SELECT id, name, onboarding_completed, COALESCE(industry, ''), created_at 
+		 FROM workspaces WHERE id = $1`, wid,
+	).Scan(&snapshot.Workspace.ID, &snapshot.Workspace.Name, &snapshot.Workspace.OnboardingCompleted, &snapshot.Workspace.Industry, &snapshot.Workspace.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get workspace: %w", err)
+	}
+
+	// 2. Get Pipelines and Stages
+	pRows, err := r.db.Query(ctx, `SELECT id, name, is_default FROM pipelines WHERE workspace_id = $1`, wid)
+	if err == nil {
+		defer pRows.Close()
+		for pRows.Next() {
+			var p models.PipelineWithStages
+			if err := pRows.Scan(&p.ID, &p.Name, &p.IsDefault); err == nil {
+				// Fetch stages for this pipeline
+				sRows, err := r.db.Query(ctx, `SELECT id, name, sort_order FROM stages WHERE pipeline_id = $1 ORDER BY sort_order`, p.ID)
+				if err == nil {
+					defer sRows.Close()
+					for sRows.Next() {
+						var st models.Stage
+						if err := sRows.Scan(&st.ID, &st.Name, &st.SortOrder); err == nil {
+							p.Stages = append(p.Stages, st)
+						}
+					}
+				}
+				snapshot.Pipelines = append(snapshot.Pipelines, p)
+			}
+		}
+	}
+
+	// 3. Get Departments
+	dRows, err := r.db.Query(ctx, `SELECT id, name FROM departments WHERE workspace_id = $1`, wid)
+	if err == nil {
+		defer dRows.Close()
+		for dRows.Next() {
+			var d models.Department
+			if err := dRows.Scan(&d.ID, &d.Name); err == nil {
+				snapshot.Departments = append(snapshot.Departments, d)
+			}
+		}
+	}
+
+	// 4. Get Team
+	uRows, err := r.db.Query(ctx, `SELECT name, role FROM users WHERE workspace_id = $1`, wid)
+	if err == nil {
+		defer uRows.Close()
+		for uRows.Next() {
+			var u models.UserSummary
+			if err := uRows.Scan(&u.Name, &u.Role); err == nil {
+				snapshot.Team = append(snapshot.Team, u)
+			}
+		}
+	}
+
+	// 5. Get Quick Stats
+	var dealCount, companyCount int
+	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM deals WHERE workspace_id = $1`, wid).Scan(&dealCount)
+	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM companies WHERE workspace_id = $1`, wid).Scan(&companyCount)
+	
+	snapshot.Stats["deals_total"] = dealCount
+	snapshot.Stats["companies_total"] = companyCount
+
+	return snapshot, nil
 }

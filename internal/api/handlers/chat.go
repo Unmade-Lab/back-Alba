@@ -134,3 +134,34 @@ func (h *ChatHandler) GetSessions(c *gin.Context) {
 	})
 }
 
+// CreateSession handles POST /chat/sessions
+func (h *ChatHandler) CreateSession(c *gin.Context) {
+	uidStr, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "user not authenticated"})
+		return
+	}
+
+	uid, err := uuid.Parse(uidStr.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id format"})
+		return
+	}
+
+	var req struct {
+		Title string `json:"title"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	sessionID, err := h.service.CreateNewSession(c.Request.Context(), uid, req.Title)
+	if err != nil {
+		h.logger.Error("create session", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create session"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"session_id": sessionID,
+		"status":     "created",
+	})
+}

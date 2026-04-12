@@ -46,3 +46,21 @@ type Department struct {
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
+// WorkspaceSnapshot represents a summary of the workspace state for AI context.
+type WorkspaceSnapshot struct {
+	Workspace      Workspace              `json:"workspace"`
+	Pipelines      []PipelineWithStages   `json:"pipelines"`
+	Departments    []Department           `json:"departments"`
+	Team           []UserSummary          `json:"team"`
+	Stats          map[string]interface{} `json:"stats"`
+}
+
+type PipelineWithStages struct {
+	Pipeline
+	Stages []Stage `json:"stages"`
+}
+
+type UserSummary struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
+}

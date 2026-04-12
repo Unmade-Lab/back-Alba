@@ -101,15 +101,45 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 	}
 	llmHistory := toOrchestratorHistory(history)
 
-	// --- Onboarding Check ---
-	var onboardingContext string
+	// --- Workspace & Identity Context ---
 	widStr := ctx.Value(models.CtxWorkspaceID)
+	var identityContext string
 	if widStr != nil {
 		wid, _ := uuid.Parse(widStr.(string))
 		workspace, _ := s.repo.GetWorkspace(ctx, wid)
-		if workspace != nil && !workspace.OnboardingCompleted {
-			onboardingContext = "THE WORKSPACE IS NEW. You are in ONBOARDING MODE. Ask about business type, goals, and team. Once you have enough info, call 'complete_onboarding'."
+		
+		// Try to get user name
+		var userName string = "the user"
+		if req.UserID != nil {
+			_ = s.repo.DB().QueryRow(ctx, "SELECT name FROM users WHERE id = $1", req.UserID).Scan(&userName)
 		}
+
+		if workspace != nil {
+			identityContext = fmt.Sprintf("You are talking to %s from the workspace '%s'.", userName, workspace.Name)
+			
+			// Fetch Full Snapshot
+			snapshot, err := s.repo.GetWorkspaceSnapshot(ctx, wid)
+			if err == nil {
+				snapshotJSON, _ := json.MarshalIndent(snapshot, "", "  ")
+				identityContext += fmt.Sprintf("\n\n[WORKSPACE SNAPSHOT]\n%s", string(snapshotJSON))
+			}
+
+			if !workspace.OnboardingCompleted {
+				identityContext += "\n\nTHE WORKSPACE IS NEW. You are in ONBOARDING MODE. Greet them and ask about their business type, goals, and team. Once you have enough info, call 'complete_onboarding'."
+			}
+		}
+	}
+
+	// --- Auto-Titling Logic ---
+	// If this is the first real user message, trigger title generation.
+	if len(history) <= 2 {
+		go func() {
+			title, err := s.orchestrator.GenerateTitle(context.Background(), req.Message)
+			if err == nil && title != "" && widStr != nil {
+				bgCtx := context.WithValue(context.Background(), models.CtxWorkspaceID, widStr)
+				_ = s.repo.UpdateSessionTitle(bgCtx, req.SessionID, title)
+			}
+		}()
 	}
 
 	// If this is the very first message in the session, automatically create a Session record with an AI-generated title.
@@ -151,7 +181,7 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 	}
 
 	// 5. Extract intent via AI Orchestrator (with streaming callback).
-	intent, plainText, err := s.orchestrator.ExtractIntent(ctx, req.Message, convCtx, llmHistory, onboardingContext, onChunk)
+	intent, plainText, err := s.orchestrator.ExtractIntent(ctx, req.Message, convCtx, llmHistory, identityContext, onChunk)
 	if err != nil {
 		return nil, fmt.Errorf("extract intent: %w", err)
 	}
@@ -244,11 +274,29 @@ func (s *Service) InitializeOnboarding(ctx context.Context, userID uuid.UUID, wo
 		return fmt.Errorf("create initial session: %w", err)
 	}
 
-	// 3. Prepare onboarding context for the AI
-	onboardingContext := "THE WORKSPACE IS NEW. You are in ONBOARDING MODE. This is your FIRST interaction with this user. Introduce yourself as Alba, your AI CRM assistant, and ask to start the onboarding to set up the workspace."
+	// 3. Prepare identity and onboarding context for the AI
+	var userName string = "the user"
+	_ = s.repo.DB().QueryRow(ctx, "SELECT name FROM users WHERE id = $1", userID).Scan(&userName)
+
+	workspace, _ := s.repo.GetWorkspace(ctx, workspaceID)
+	workspaceName := "your company"
+	if workspace != nil {
+		workspaceName = workspace.Name
+	}
+
+	identityContext := fmt.Sprintf("You are talking to %s from the workspace '%s'.", userName, workspaceName)
+
+	// Fetch Full Snapshot
+	snapshot, err := s.repo.GetWorkspaceSnapshot(ctx, workspaceID)
+	if err == nil {
+		snapshotJSON, _ := json.MarshalIndent(snapshot, "", "  ")
+		identityContext += fmt.Sprintf("\n\n[WORKSPACE SNAPSHOT]\n%s", string(snapshotJSON))
+	}
+
+	identityContext += "\n\nTHE WORKSPACE IS NEW. You are in ONBOARDING MODE. This is your FIRST interaction with this user. Introduce yourself as Alba, your AI CRM assistant, and ask to start the onboarding to set up the workspace."
 
 	// 4. Generate AI greeting
-	greeting, err := s.orchestrator.GenerateWelcome(ctx, onboardingContext)
+	greeting, err := s.orchestrator.GenerateWelcome(ctx, identityContext)
 	if err != nil {
 		s.logger.Error("failed to generate welcome message", zap.Error(err))
 		greeting = "Привет! Я Альба, твой AI-помощник в управлении CRM. Давай настроим твой воркспейс, чтобы тебе было удобно работать?"
@@ -269,7 +317,44 @@ func (s *Service) InitializeOnboarding(ctx context.Context, userID uuid.UUID, wo
 	return nil
 }
 
-// GetHistory returns paginated chat history for a session.
+// CreateNewSession creates a new chat session for a user and returns its ID.
+func (s *Service) CreateNewSession(ctx context.Context, userID uuid.UUID, title string) (string, error) {
+	sessionID := uuid.New().String()
+	
+	if title == "" {
+		title = "New Chat"
+	}
+
+	if err := s.repo.CreateSession(ctx, sessionID, userID, title); err != nil {
+		return "", fmt.Errorf("create session in db: %w", err)
+	}
+
+	// Optional: Generate a quick greeting so the chat isn't empty
+	workspaceIDStr := ctx.Value(models.CtxWorkspaceID)
+	var workspaceName string = "your company"
+	if workspaceIDStr != nil {
+		wID, _ := uuid.Parse(workspaceIDStr.(string))
+		workspace, _ := s.repo.GetWorkspace(ctx, wID)
+		if workspace != nil {
+			workspaceName = workspace.Name
+		}
+	}
+
+	greeting := fmt.Sprintf("Hello! I'm Alba, your AI assistant for %s. How can I help you today?", workspaceName)
+	
+	assistantMsg := &models.ChatMessage{
+		SessionID: sessionID,
+		UserID:    &userID,
+		Role:      models.RoleAssistant,
+		Content:   greeting,
+	}
+
+	if err := s.repo.Save(ctx, assistantMsg); err != nil {
+		s.logger.Warn("failed to save initial greeting", zap.Error(err))
+	}
+
+	return sessionID, nil
+}
 func (s *Service) GetHistory(ctx context.Context, sessionID string, limit int) ([]*models.ChatMessage, error) {
 	return s.repo.GetHistory(ctx, sessionID, limit)
 }

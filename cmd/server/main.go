@@ -74,6 +74,12 @@ func main() {
 	// ── Conversation Context Manager ──────────────────────────────────────────
 	ctxManager := convctx.NewManager(redisClient, logger)
 
+	// ── WebSocket Hub ─────────────────────────────────────────────────────────
+	hub := ws.NewHub(logger)
+
+	// ── Wire Notifications: Domain Events -> WS Push ──────────────────────────
+	ws.RegisterNotificationHandlers(dispatcher, hub)
+
 	// ── Chat Layer ────────────────────────────────────────────────────────────
 	chatRepo := chat.NewRepository(pgPool)
 
@@ -86,6 +92,11 @@ func main() {
 	registry.Register(actions.NewGetDealsAction(pgPool))
 	registry.Register(actions.NewUpdateDealStageAction(pgPool, dispatcher))
 	registry.Register(actions.NewCompleteOnboardingAction(pgPool, chatRepo))
+	registry.Register(actions.NewCreateTaskAction(pgPool, logger))
+	registry.Register(actions.NewGetTasksAction(pgPool, logger))
+	registry.Register(actions.NewGetPipelineReportAction(pgPool))
+	registry.Register(actions.NewGetBusinessSummaryAction(pgPool))
+	registry.Register(actions.NewEnrichCompanyAction(pgPool, logger))
 
 	logger.Info("Action registry initialised", zap.Int("actions", len(registry.All())))
 
@@ -95,8 +106,6 @@ func main() {
 	// ── Widget Builder ────────────────────────────────────────────────────────
 	widgetBuilder := widget.NewBuilder()
 
-	// ── WebSocket Hub ─────────────────────────────────────────────────────────
-	hub := ws.NewHub(logger)
 
 	// ── Chat Layer ────────────────────────────────────────────────────────────
 	chatService := chat.NewService(chatRepo, orch, registry, ctxManager, widgetBuilder, hub, logger)
