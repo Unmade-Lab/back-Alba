@@ -6,6 +6,7 @@
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN DEFAULT FALSE;
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS industry VARCHAR(100);
 ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS onboarding_data JSONB DEFAULT '{}';
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 -- 2. Pipelines (sales funnels)
 CREATE TABLE IF NOT EXISTS pipelines (

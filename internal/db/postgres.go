@@ -50,6 +50,7 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool, logger *zap.Logger) 
 		"004_workspaces.sql",
 		"005_refresh_tokens.sql",
 		"006_onboarding.sql",
+		"007_fix_workspace_updated_at.sql",
 	}
 
 	for _, filename := range files {
