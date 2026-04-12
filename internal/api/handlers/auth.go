@@ -17,6 +17,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Define interface for chat service to avoid circular dependency if any
+type OnboardingService interface {
+	InitializeOnboarding(ctx context.Context, userID uuid.UUID, workspaceID uuid.UUID) error
+}
+
 const (
 	accessTokenTTL  = 15 * time.Minute
 	refreshTokenTTL = 30 * 24 * time.Hour // 30 days
@@ -24,13 +29,14 @@ const (
 )
 
 type AuthHandler struct {
-	db        *pgxpool.Pool
-	logger    *zap.Logger
-	jwtSecret string
+	db          *pgxpool.Pool
+	logger      *zap.Logger
+	jwtSecret   string
+	chatService OnboardingService
 }
 
-func NewAuthHandler(db *pgxpool.Pool, jwtSecret string, logger *zap.Logger) *AuthHandler {
-	return &AuthHandler{db: db, jwtSecret: jwtSecret, logger: logger}
+func NewAuthHandler(db *pgxpool.Pool, jwtSecret string, logger *zap.Logger, chatService OnboardingService) *AuthHandler {
+	return &AuthHandler{db: db, jwtSecret: jwtSecret, logger: logger, chatService: chatService}
 }
 
 // ─────────────────────────────────────────────
@@ -168,6 +174,15 @@ func (h *AuthHandler) RegisterWorkspace(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
+
+	// Proactively initialize onboarding chat
+	go func() {
+		uID, _ := uuid.Parse(userID)
+		wID, _ := uuid.Parse(workspaceID)
+		if err := h.chatService.InitializeOnboarding(context.Background(), uID, wID); err != nil {
+			h.logger.Error("failed to initialize onboarding chat", zap.Error(err))
+		}
+	}()
 
 	accessToken, refreshToken, err := h.issueTokenPair(ctx, userID, req.Email, "admin", workspaceID)
 	if err != nil {

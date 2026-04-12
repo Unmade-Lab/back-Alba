@@ -231,6 +231,44 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 	return response, nil
 }
 
+// InitializeOnboarding creates the first chat session and a proactive AI greeting for new workspaces.
+func (s *Service) InitializeOnboarding(ctx context.Context, userID uuid.UUID, workspaceID uuid.UUID) error {
+	// 1. Generate a session ID
+	sessionID := uuid.New().String()
+
+	// 2. Create the session in DB
+	// We need to inject workspace_id into ctx for repo methods to work
+	ctx = context.WithValue(ctx, models.CtxWorkspaceID, workspaceID.String())
+	
+	if err := s.repo.CreateSession(ctx, sessionID, userID, "Welcome to Alba"); err != nil {
+		return fmt.Errorf("create initial session: %w", err)
+	}
+
+	// 3. Prepare onboarding context for the AI
+	onboardingContext := "THE WORKSPACE IS NEW. You are in ONBOARDING MODE. This is your FIRST interaction with this user. Introduce yourself as Alba, your AI CRM assistant, and ask to start the onboarding to set up the workspace."
+
+	// 4. Generate AI greeting
+	greeting, err := s.orchestrator.GenerateWelcome(ctx, onboardingContext)
+	if err != nil {
+		s.logger.Error("failed to generate welcome message", zap.Error(err))
+		greeting = "Привет! Я Альба, твой AI-помощник в управлении CRM. Давай настроим твой воркспейс, чтобы тебе было удобно работать?"
+	}
+
+	// 5. Save AI message
+	assistantMsg := &models.ChatMessage{
+		SessionID: sessionID,
+		UserID:    &userID,
+		Role:      models.RoleAssistant,
+		Content:   greeting,
+	}
+
+	if err := s.repo.Save(ctx, assistantMsg); err != nil {
+		return fmt.Errorf("save welcome message: %w", err)
+	}
+
+	return nil
+}
+
 // GetHistory returns paginated chat history for a session.
 func (s *Service) GetHistory(ctx context.Context, sessionID string, limit int) ([]*models.ChatMessage, error) {
 	return s.repo.GetHistory(ctx, sessionID, limit)

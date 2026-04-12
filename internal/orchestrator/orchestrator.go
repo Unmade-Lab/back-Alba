@@ -90,6 +90,31 @@ func (o *Orchestrator) GenerateTitle(ctx context.Context, firstMessage string) (
 	return "New Chat", nil
 }
 
+// GenerateWelcome generates a proactive greeting message for a new user.
+func (o *Orchestrator) GenerateWelcome(ctx context.Context, onboardingContext string) (string, error) {
+	if o.mockMode {
+		return "Привет! Я Альба, твой AI-помощник. Давай настроим твой воркспейс?", nil
+	}
+
+	model := o.client.GenerativeModel(o.model)
+	model.SystemInstruction = &genai.Content{
+		Parts: []genai.Part{genai.Text(SystemPrompt("", onboardingContext))},
+	}
+
+	prompt := "Say hello to the new user and briefly explain that you are their AI CRM assistant. Ask them to start the onboarding process to configure their workspace."
+	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+	if err != nil {
+		return "", fmt.Errorf("generate welcome: %w", err)
+	}
+
+	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
+		if t, ok := resp.Candidates[0].Content.Parts[0].(genai.Text); ok {
+			return strings.TrimSpace(string(t)), nil
+		}
+	}
+	return "Привет! Я готов помочь вам в настройке CRM.", nil
+}
+
 // ─────────────────────────────────────────────
 // Gemini path (function calling)
 // ─────────────────────────────────────────────
