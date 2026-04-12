@@ -74,6 +74,9 @@ func main() {
 	// ── Conversation Context Manager ──────────────────────────────────────────
 	ctxManager := convctx.NewManager(redisClient, logger)
 
+	// ── Chat Layer ────────────────────────────────────────────────────────────
+	chatRepo := chat.NewRepository(pgPool)
+
 	// ── Action Registry ───────────────────────────────────────────────────────
 	registry := actions.NewRegistry()
 	registry.Register(actions.NewCreateDealAction(pgPool, dispatcher))
@@ -82,6 +85,7 @@ func main() {
 	registry.Register(actions.NewInviteUserDraftAction())
 	registry.Register(actions.NewGetDealsAction(pgPool))
 	registry.Register(actions.NewUpdateDealStageAction(pgPool, dispatcher))
+	registry.Register(actions.NewCompleteOnboardingAction(pgPool, chatRepo))
 
 	logger.Info("Action registry initialised", zap.Int("actions", len(registry.All())))
 
@@ -95,11 +99,10 @@ func main() {
 	hub := ws.NewHub(logger)
 
 	// ── Chat Layer ────────────────────────────────────────────────────────────
-	chatRepo := chat.NewRepository(pgPool)
 	chatService := chat.NewService(chatRepo, orch, registry, ctxManager, widgetBuilder, hub, logger)
 
 	// ── HTTP Handlers & Router ────────────────────────────────────────────────
-	committer := actions.NewCommitter(pgPool, dispatcher)
+	committer := actions.NewCommitter(pgPool, dispatcher, cfg.AppURL)
 	cmdHandler := handlers.NewCommandHandler(committer, ctxManager, logger)
 	chatHandler := handlers.NewChatHandler(chatService, hub, logger)
 	wsHandler := handlers.NewWSHandler(hub, logger)

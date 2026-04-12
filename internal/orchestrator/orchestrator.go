@@ -53,12 +53,13 @@ func (o *Orchestrator) ExtractIntent(
 	message string,
 	convCtx *convctx.ConversationContext,
 	history []HistoryMessage,
+	onboardingContext string,
 	onChunk func(string),
 ) (*Intent, string, error) {
 	if o.mockMode {
 		return o.keywordFallback(message, onChunk)
 	}
-	return o.geminiExtract(ctx, message, convCtx, history, onChunk)
+	return o.geminiExtract(ctx, message, convCtx, history, onboardingContext, onChunk)
 }
 
 // GenerateTitle generates a short 3-5 word title for the chat session based on the first message.
@@ -98,11 +99,12 @@ func (o *Orchestrator) geminiExtract(
 	message string,
 	convCtx *convctx.ConversationContext,
 	history []HistoryMessage,
+	onboardingContext string,
 	onChunk func(string),
 ) (*Intent, string, error) {
 	model := o.client.GenerativeModel(o.model)
 	model.SystemInstruction = &genai.Content{
-		Parts: []genai.Part{genai.Text(SystemPrompt(buildContextSummary(convCtx)))},
+		Parts: []genai.Part{genai.Text(SystemPrompt(buildContextSummary(convCtx), onboardingContext))},
 	}
 
 	model.Tools = o.buildTools()

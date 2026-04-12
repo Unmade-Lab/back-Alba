@@ -15,10 +15,11 @@ import (
 type Committer struct {
 	db     *pgxpool.Pool
 	events *events.Dispatcher
+	appURL string
 }
 
-func NewCommitter(db *pgxpool.Pool, dispatcher *events.Dispatcher) *Committer {
-	return &Committer{db: db, events: dispatcher}
+func NewCommitter(db *pgxpool.Pool, dispatcher *events.Dispatcher, appURL string) *Committer {
+	return &Committer{db: db, events: dispatcher, appURL: appURL}
 }
 
 // Commit executes the physical database changes for a confirmed draft.
@@ -163,7 +164,7 @@ func (c *Committer) commitInviteUser(ctx context.Context, payload map[string]int
 		return nil, fmt.Errorf("insert invitation: %w", err)
 	}
 
-	inviteURL := fmt.Sprintf("http://localhost:3000/invite?token=%s", token)
+	inviteURL := fmt.Sprintf("%s/invite?token=%s", c.appURL, token)
 
 	return map[string]interface{}{
 		"status": "success",

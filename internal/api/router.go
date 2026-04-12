@@ -46,6 +46,8 @@ func NewRouter(
 		auth.POST("/register", authHandler.RegisterWorkspace)
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/activate", authHandler.ActivateInvite)
+		auth.POST("/refresh", authHandler.Refresh)
+		auth.POST("/logout", authHandler.Logout)
 	}
 
 	// Authenticated API routes.
@@ -58,6 +60,7 @@ func NewRouter(
 			chat.GET("/history", chatHandler.GetHistory)
 			chat.GET("/sessions", chatHandler.GetSessions)
 		}
+		api.GET("/workspace/status", authHandler.WorkspaceStatus)
 		cmds := api.Group("/commands")
 		{
 			cmds.POST("/commit", cmdHandler.CommitDraft)

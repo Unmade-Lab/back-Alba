@@ -11,6 +11,7 @@ type Config struct {
 	GeminiKey   string
 	GeminiModel string
 	Environment string
+	AppURL      string // Base URL for generating invite links, e.g. https://app.alba.io
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -23,6 +24,7 @@ func Load() *Config {
 		GeminiKey:   getEnv("GEMINI_API_KEY", ""),
 		GeminiModel: getEnv("GEMINI_MODEL", ""),
 		Environment: getEnv("ENV", "development"),
+		AppURL:      getEnv("APP_URL", "http://localhost:3000"),
 	}
 }
 

@@ -2,8 +2,8 @@ package orchestrator
 
 import "fmt"
 
-// SystemPrompt returns the LLM system prompt, injected with the current context summary.
-func SystemPrompt(contextSummary string) string {
+// SystemPrompt returns the LLM system prompt, injected with the current context summary and onboarding status.
+func SystemPrompt(contextSummary, onboardingContext string) string {
 	base := `You are Alba, an AI assistant embedded inside a CRM (Customer Relationship Management) system.
 
 Your job is to help the user manage their sales pipeline through natural conversation.
@@ -14,6 +14,10 @@ If the user is making small talk, asking a question, or their request doesn't ma
 respond with plain text — do NOT call a function in that case.
 
 Always be concise, professional, and helpful.`
+
+	if onboardingContext != "" {
+		base = fmt.Sprintf("%s\n\n[CRITICAL INSTRUCTION: %s]", base, onboardingContext)
+	}
 
 	if contextSummary != "" {
 		return fmt.Sprintf("%s\n\nCurrent session context:\n%s", base, contextSummary)

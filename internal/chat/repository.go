@@ -146,3 +146,71 @@ func (r *Repository) CreateSession(ctx context.Context, sessionID string, userID
 	}
 	return nil
 }
+
+// GetWorkspace returns a workspace by ID.
+func (r *Repository) GetWorkspace(ctx context.Context, id uuid.UUID) (*models.Workspace, error) {
+	var ws models.Workspace
+	err := r.db.QueryRow(ctx,
+		`SELECT id, name, onboarding_completed, industry, onboarding_data, created_at
+		 FROM workspaces WHERE id = $1`,
+		id,
+	).Scan(&ws.ID, &ws.Name, &ws.OnboardingCompleted, &ws.Industry, &ws.OnboardingData, &ws.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &ws, nil
+}
+
+// UpdateWorkspaceOnboarding marks onboarding as completed and saves industry data.
+func (r *Repository) UpdateWorkspaceOnboarding(ctx context.Context, id uuid.UUID, industry string, data json.RawMessage) error {
+	_, err := r.db.Exec(ctx,
+		`UPDATE workspaces 
+		 SET onboarding_completed = TRUE, industry = $1, onboarding_data = $2, updated_at = NOW()
+		 WHERE id = $3`,
+		industry, data, id,
+	)
+	return err
+}
+
+// SeedOnboardingTemplates creates the initial structure for a workspace.
+func (r *Repository) SeedOnboardingTemplates(ctx context.Context, wid uuid.UUID, pipelineName string, stages []string, departments []string) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// 1. Create Pipeline
+	var pipelineID uuid.UUID
+	err = tx.QueryRow(ctx,
+		`INSERT INTO pipelines (workspace_id, name, is_default) VALUES ($1, $2, TRUE) RETURNING id`,
+		wid, pipelineName,
+	).Scan(&pipelineID)
+	if err != nil {
+		return fmt.Errorf("create pipeline: %w", err)
+	}
+
+	// 2. Create Stages
+	for i, stageName := range stages {
+		_, err = tx.Exec(ctx,
+			`INSERT INTO stages (pipeline_id, name, sort_order) VALUES ($1, $2, $3)`,
+			pipelineID, stageName, i*10,
+		)
+		if err != nil {
+			return fmt.Errorf("create stage %s: %w", stageName, err)
+		}
+	}
+
+	// 3. Create Departments
+	for _, depName := range departments {
+		_, err = tx.Exec(ctx,
+			`INSERT INTO departments (workspace_id, name) VALUES ($1, $2)`,
+			wid, depName,
+		)
+		if err != nil {
+			return fmt.Errorf("create department %s: %w", depName, err)
+		}
+	}
+
+	return tx.Commit(ctx)
+}

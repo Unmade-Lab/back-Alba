@@ -101,6 +101,17 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 	}
 	llmHistory := toOrchestratorHistory(history)
 
+	// --- Onboarding Check ---
+	var onboardingContext string
+	widStr := ctx.Value(models.CtxWorkspaceID)
+	if widStr != nil {
+		wid, _ := uuid.Parse(widStr.(string))
+		workspace, _ := s.repo.GetWorkspace(ctx, wid)
+		if workspace != nil && !workspace.OnboardingCompleted {
+			onboardingContext = "THE WORKSPACE IS NEW. You are in ONBOARDING MODE. Ask about business type, goals, and team. Once you have enough info, call 'complete_onboarding'."
+		}
+	}
+
 	// If this is the very first message in the session, automatically create a Session record with an AI-generated title.
 	if len(history) == 1 && req.UserID != nil {
 		go func(msgText string, sessionID string, uID uuid.UUID) {
@@ -140,7 +151,7 @@ func (s *Service) Process(ctx context.Context, req MessageRequest) (*MessageResp
 	}
 
 	// 5. Extract intent via AI Orchestrator (with streaming callback).
-	intent, plainText, err := s.orchestrator.ExtractIntent(ctx, req.Message, convCtx, llmHistory, onChunk)
+	intent, plainText, err := s.orchestrator.ExtractIntent(ctx, req.Message, convCtx, llmHistory, onboardingContext, onChunk)
 	if err != nil {
 		return nil, fmt.Errorf("extract intent: %w", err)
 	}
